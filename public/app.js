@@ -4,7 +4,11 @@
 
 const state = {
   cards: [],
+  cardOrder: [],
   activeCardId: null,
+  hiddenBalances: false,
+  cardSelectionChanged: false,
+  expandedCardId: null,
   overview: null,
   categories: [],
   themes: [],
@@ -24,6 +28,57 @@ const CARD_THEMES = {
   slate: 'linear-gradient(135deg, #1f2937 0%, #4b5563 100%)',
   ocean: 'linear-gradient(135deg, #1e3a8a 0%, #38bdf8 100%)',
 };
+
+const CARD_COLOR_PRESETS = [
+  { name: 'Charcoal', value: '#252827' },
+  { name: 'Navy', value: '#24364b' },
+  { name: 'Forest', value: '#25483a' },
+  { name: 'Burgundy', value: '#59343d' },
+  { name: 'Gold', value: '#8a7041' },
+];
+
+function parseHexColor(value) {
+  const match = /^#?([0-9a-f]{6})$/i.exec(String(value || ''));
+  if (!match) return [37, 40, 39];
+  return [0, 2, 4].map((index) => parseInt(match[1].slice(index, index + 2), 16));
+}
+
+function rgbHex([r, g, b]) {
+  return `#${[r, g, b].map((channel) => Math.max(0, Math.min(255, Math.round(channel))).toString(16).padStart(2, '0')).join('')}`;
+}
+
+function getCardTextColor(value) {
+  const [r, g, b] = parseHexColor(value);
+  const linear = [r, g, b].map((channel) => {
+    const normalized = channel / 255;
+    return normalized <= .04045 ? normalized / 12.92 : ((normalized + .055) / 1.055) ** 2.4;
+  });
+  const luminance = .2126 * linear[0] + .7152 * linear[1] + .0722 * linear[2];
+  return luminance > .179 ? '#111512' : '#ffffff';
+}
+
+function cardColorTokens(value, isBack = false) {
+  const [r, g, b] = parseHexColor(value);
+  const factor = isBack ? .82 : 1;
+  const base = [r * factor, g * factor, b * factor];
+  const bottom = base.map((channel) => channel * (isBack ? .76 : .84));
+  const luminance = ([red, green, blue]) => [red, green, blue]
+    .map((channel) => {
+      const normalized = channel / 255;
+      return normalized <= .04045 ? normalized / 12.92 : ((normalized + .055) / 1.055) ** 2.4;
+    })
+    .reduce((sum, channel, index) => sum + channel * [.2126, .7152, .0722][index], 0);
+  const contrast = (foreground, background) => {
+    const lighter = Math.max(foreground, background);
+    const darker = Math.min(foreground, background);
+    return (lighter + .05) / (darker + .05);
+  };
+  const endpointLuminances = [luminance(base), luminance(bottom)];
+  const whiteScore = Math.min(...endpointLuminances.map((background) => contrast(1, background)));
+  const blackScore = Math.min(...endpointLuminances.map((background) => contrast(0, background)));
+  const text = whiteScore >= blackScore ? '#ffffff' : '#111512';
+  return `--card-top:${rgbHex(base)};--card-bottom:${rgbHex(bottom)};--card-ink:${text};--card-muted:${text};`;
+}
 
 const CATEGORY_ICONS = {
   Housing: '<path d="M3 10l9-7 9 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 13 15 13 15 22"/>',
@@ -83,8 +138,12 @@ async function refresh() {
   ]);
   state.cards = cardsRes.cards;
   state.overview = overview;
+  state.cardOrder = state.cardOrder.filter((id) => state.cards.some((card) => card.id === id));
+  state.cards.forEach((card) => {
+    if (!state.cardOrder.includes(card.id)) state.cardOrder.unshift(card.id);
+  });
   if (!state.cards.some((c) => c.id === state.activeCardId)) {
-    state.activeCardId = state.cards.length ? state.cards[state.cards.length - 1].id : null;
+    state.activeCardId = state.cardOrder[0] || null;
   }
   renderAll();
 }
@@ -99,54 +158,163 @@ function renderAll() {
 
 /* ------------------------------------------------------------- rendering */
 
+function networkLogo(network) {
+  const name = String(network || 'card').toLowerCase();
+  if (name === 'mastercard') {
+    return '<svg class="network-logo mastercard-logo" viewBox="0 0 52 34" role="img" aria-label="Mastercard"><circle cx="19" cy="15" r="13" fill="#eb001b"/><circle cx="33" cy="15" r="13" fill="#f79e1b" fill-opacity=".95"/><text x="26" y="32" text-anchor="middle" fill="currentColor" font-size="5" font-family="Arial,sans-serif">mastercard</text></svg>';
+  }
+  if (name === 'visa') {
+    return '<svg class="network-logo visa-logo" viewBox="0 0 58 24" role="img" aria-label="Visa"><path fill="currentColor" d="M22.7 3.5 14.9 20.6H9.8L6 6.9c-.2-.8-.4-1.1-1.1-1.5C3.8 4.8 2 4.3.4 4l.1-.5h8.2c1 0 1.8.7 2 1.6l2 10.8 5-12.4zm19.8 11.5c0-4.5-6.3-4.7-6.3-6.7 0-.6.6-1.3 1.8-1.5 1.8-.2 3.6.1 5.2.9l.9-4.1c-1.5-.5-3.1-.8-4.7-.8-5 0-8.5 2.7-8.5 6.5 0 2.8 2.5 4.4 4.5 5.3 2 .9 2.7 1.5 2.7 2.3 0 1.2-1.5 1.7-2.9 1.7-2 .1-4-.4-5.8-1.4l-.9 4.2c1.8.7 3.8 1 5.8 1 5.3 0 8.8-2.6 8.8-6.6m12.5 5.6h4.5L55.6 3.5h-4.1c-.9 0-1.7.5-2 1.3l-7.3 15.8h5.3l1-2.9h6.5zm-5.6-7.1 2.6-7.2 1.5 7.2zM29 3.5l-4.2 17.1h-5L24 3.5z"/></svg>';
+  }
+  const label = ({ amex: 'AMEX', discover: 'DISCOVER' }[name] || String(network || 'CARD').toUpperCase());
+  return `<svg class="network-logo generic-logo" viewBox="0 0 72 24" role="img" aria-label="${escapeHtml(label)}"><text x="36" y="17" text-anchor="middle" fill="currentColor" font-size="13" font-weight="700" font-family="Arial,sans-serif">${escapeHtml(label)}</text></svg>`;
+}
+
+function formattedBalance(card) {
+  const currency = /^[A-Z]{3}$/.test(card.currency || '') ? card.currency : 'USD';
+  const parts = new Intl.NumberFormat('en-US', {
+    style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2,
+  }).formatToParts(Number(card.balance) || 0);
+  const decimalIndex = parts.findIndex((part) => part.type === 'decimal');
+  const fractionIndex = parts.findIndex((part) => part.type === 'fraction');
+  if (decimalIndex < 0 || fractionIndex < 0) return escapeHtml(new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(Number(card.balance) || 0));
+  const whole = parts.slice(0, decimalIndex).map((part) => part.value).join('');
+  const cents = parts[fractionIndex].value;
+  const suffix = parts.slice(fractionIndex + 1).map((part) => part.value).join('');
+  return `<span>${escapeHtml(whole)}</span><small>.${escapeHtml(cents)}</small><span>${escapeHtml(suffix)}</span>`;
+}
+
+function cardFace(card, layer = 'front', expanded = false) {
+  const hidden = state.hiddenBalances;
+  const id = Number(card.id);
+  const holder = escapeHtml(card.holder_name || 'Card holder');
+  const type = escapeHtml(card.card_type || card.type || 'Physical Card');
+  const colorStyle = cardColorTokens(card.card_color || '#252827', layer === 'back');
+  const rawStatus = String(card.status || 'active').toLowerCase();
+  const status = ['active', 'frozen', 'expired'].includes(rawStatus) ? rawStatus : 'active';
+  return `<div class="physical-card-face ${layer} ${expanded ? 'is-expanded' : ''}" data-card-face="${id}" style="${colorStyle}">
+    <div class="physical-card-head">
+      <span class="card-kind">${type}</span>
+      <div class="card-head-actions">
+        <button type="button" class="balance-toggle" data-toggle-balance="${id}" aria-label="${hidden ? 'Show' : 'Hide'} balance" aria-pressed="${hidden}">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/><path class="eye-slash" d="m3 3 18 18"/></svg>
+        </button>
+        ${expanded ? '<button type="button" class="collapse-card" data-collapse-card aria-label="Collapse card details"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 14 6-6 6 6"/></svg></button>' : ''}
+      </div>
+    </div>
+    <div class="physical-card-balance">
+      <span class="card-balance-label">Available Balance</span>
+      <span class="card-balance-value ${hidden ? 'is-hidden' : ''}" data-card-balance="${id}" aria-label="${hidden ? 'Balance hidden' : `Balance ${money(card.balance)}`}" aria-live="polite">${hidden ? '••••••' : formattedBalance(card)}</span>
+      <span class="physical-card-number" role="text" aria-label="Card ending in ${escapeHtml(card.last4 || '0000')}"><span aria-hidden="true">•••• &nbsp; •••• &nbsp; •••• &nbsp;</span>${escapeHtml(card.last4 || '0000')}</span>
+    </div>
+    <div class="physical-card-details">
+      <div class="card-holder"><span>Card Holder</span><strong>${holder}</strong></div>
+      <div class="card-expiry"><span>Expires</span><strong>${String(card.exp_month || 1).padStart(2, '0')}/${card.exp_year || '----'}</strong></div>
+      <div class="network-logo-wrap">${networkLogo(card.brand)}</div>
+    </div>
+    ${expanded ? `<div class="expanded-card-details" aria-label="Card details expanded">
+      <div class="expanded-details-heading"><span>Card details</span><span role="status" aria-live="polite">Card details expanded</span></div>
+      <dl>
+        <div><dt>Type</dt><dd>${type}</dd></div>
+        <div><dt>Network</dt><dd>${escapeHtml(brandLabel(card.brand))}</dd></div>
+        <div><dt>Status</dt><dd>${escapeHtml(status.charAt(0).toUpperCase() + status.slice(1))}</dd></div>
+        <div><dt>Card number</dt><dd>•••• ${escapeHtml(card.last4 || '0000')}</dd></div>
+        <div><dt>Expires</dt><dd>${String(card.exp_month || 1).padStart(2, '0')}/${card.exp_year || '----'}</dd></div>
+        <div><dt>Cardholder</dt><dd>${holder}</dd></div>
+        <div><dt>Currency</dt><dd>${escapeHtml(card.currency || 'USD')}</dd></div>
+      </dl>
+    </div>` : ''}
+  </div>`;
+}
+
 function renderStack() {
   const el = $('#card-stack');
   if (!state.cards.length) {
-    el.innerHTML = `<div class="big-card" style="background:${CARD_THEMES.violet}">
-      <div class="bc-brand">—</div>
-      <div class="bc-row"><div><div class="bc-label">Balance</div><div class="bc-balance">$0.00</div></div></div>
-      <div class="bc-foot"><span class="bc-holder">No cards yet</span>
-      <button class="add-card-btn" data-open="add-card">+ Add Card</button></div>
-    </div>`;
+    const emptyCard = { id: 'empty', brand: 'card', balance: 0, last4: '0000', holder_name: 'Add a card to begin', exp_month: 1, exp_year: '----', theme: 'slate', card_color: '#252827' };
+    el.innerHTML = `<div class="card-deck empty-deck">${cardFace(emptyCard)}<button class="add-card-btn" data-open="add-card">+ Add Card</button></div>`;
     return;
   }
-  const active = state.cards.find((c) => c.id === state.activeCardId) || state.cards[0];
-  const others = state.cards.filter((c) => c.id !== active.id).slice(-2);
 
-  const minis = others
-    .map(
-      (c) => `<div class="mini-card" style="background:${CARD_THEMES[c.theme]}" data-card="${c.id}">
-        ${brandMark(c.brand)}
-        <span class="mc-dots">•••• •••• ${c.last4}</span>
-      </div>`
-    )
-    .join('');
-
-  el.innerHTML = `${minis}
-    <div class="big-card" style="background:${CARD_THEMES[active.theme]}">
-      <div class="bc-brand">${brandMark(active.brand)}</div>
-      <div class="bc-row">
-        <div>
-          <div class="bc-label">Balance</div>
-          <div class="bc-balance">${money(active.balance)}</div>
-        </div>
-        <div>
-          <div class="bc-label">Exp. Date</div>
-          <div class="bc-exp">${String(active.exp_month).padStart(2, '0')}/${String(active.exp_year).slice(-2)}</div>
-        </div>
-      </div>
-      <div class="bc-foot">
-        <div>
-          <div class="bc-label">Name</div>
-          <div class="bc-holder">${active.holder_name}</div>
-        </div>
-        <button class="add-card-btn" data-open="add-card">
-          <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          Add Card
-        </button>
-      </div>
+  const orderedCards = state.cardOrder.map((id) => state.cards.find((card) => card.id === id)).filter(Boolean);
+  const active = orderedCards.find((card) => card.id === state.activeCardId) || orderedCards[0];
+  const activeIndex = orderedCards.findIndex((card) => card.id === active.id);
+  const behind = orderedCards.filter((card) => card.id !== active.id).slice(0, 2).reverse();
+  const isExpanded = state.expandedCardId === active.id;
+  const stack = [...behind, active];
+  const extraBack = orderedCards.length > 3
+    ? `<span class="stack-card back back-more" style="z-index:0;${cardColorTokens(active.card_color || '#252827', true)}" aria-hidden="true"></span>`
+    : '';
+  const featuredCard = `<article class="stack-card front ${isExpanded ? 'expanded' : ''} ${state.cardSelectionChanged ? 'card-selected' : ''}" data-stack-layer="front" style="z-index:3">
+    ${!isExpanded ? `<button type="button" class="front-card-toggle" data-toggle-expand="${active.id}" aria-label="Card ending in ${escapeHtml(active.last4)}, tap to expand" aria-expanded="false"></button>` : ''}
+    ${cardFace(active, 'front', isExpanded)}
+  </article>`;
+  const expandedPicker = isExpanded ? `<section class="expanded-card-chooser" aria-label="Choose a card to bring to the front">
+    <h3>Your cards <span>${orderedCards.length}</span></h3>
+    <div class="expanded-card-options">
+      ${orderedCards.map((card, index) => `<button type="button" class="expanded-card-option ${card.id === active.id ? 'selected' : ''}" data-expanded-card-choice="${card.id}" aria-pressed="${card.id === active.id}" aria-label="${escapeHtml(card.holder_name || 'Card')}, ending in ${escapeHtml(card.last4 || '0000')}${card.id === active.id ? ', currently in front' : ', bring to front'}" style="${cardColorTokens(card.card_color || '#252827')}">
+        <span class="option-card-top"><span>${escapeHtml(card.card_type || 'Physical Card')}</span>${networkLogo(card.brand)}</span>
+        <span class="option-card-holder">${escapeHtml(card.holder_name || 'Card holder')}</span>
+        <span class="option-card-bottom"><span>•••• ${escapeHtml(card.last4 || '0000')}</span><span>${index + 1} of ${orderedCards.length}</span></span>
+      </button>`).join('')}
+    </div>
+  </section>` : '';
+  el.innerHTML = `<div class="card-deck ${isExpanded ? 'deck-open' : ''}" data-deck>
+    ${isExpanded ? featuredCard : `${extraBack}${stack.map((card, index) => {
+      const isFront = card.id === active.id;
+      const layer = isFront ? 'front' : `back back-${index}`;
+      return `<article class="stack-card ${layer} ${state.cardSelectionChanged && isFront ? 'card-selected' : ''}" data-stack-layer="${index}" style="z-index:${index + 1}">
+        ${isFront ? `<button type="button" class="front-card-toggle" data-toggle-expand="${card.id}" aria-label="Card ending in ${escapeHtml(card.last4)}, tap to expand" aria-expanded="false"></button>` : ''}
+        ${cardFace(card, layer)}
+        ${isFront ? '' : `<button type="button" class="stack-card-select" data-card="${card.id}" aria-label="Card ending in ${escapeHtml(card.last4)}, select to view"></button>`}
+      </article>`;
+    }).join('')}`}
+    </div>
+    ${expandedPicker}
+    <div class="stack-footer">
+      <span class="stack-position" role="status" aria-live="polite" aria-atomic="true">Card ${activeIndex + 1} of ${orderedCards.length}</span>
+      ${!isExpanded && orderedCards.length > 3 ? '<button type="button" class="view-all-cards" data-view-cards>View all cards</button>' : ''}
     </div>`;
+  state.cardSelectionChanged = false;
+  el.classList.toggle('has-expanded-card', isExpanded);
+  el.setAttribute('aria-expanded', String(isExpanded));
 }
+
+function toggleCardBalance() {
+  state.hiddenBalances = !state.hiddenBalances;
+  renderStack();
+  renderCards();
+}
+
+function selectCard(id) {
+  if (state.expandedCardId !== null) return;
+  state.activeCardId = Number(id);
+  state.cardOrder = [state.activeCardId, ...state.cardOrder.filter((cardId) => cardId !== state.activeCardId)];
+  state.cardSelectionChanged = true;
+  renderStack();
+}
+
+function toggleCardExpanded(id = state.activeCardId) {
+  const cardId = Number(id);
+  state.expandedCardId = state.expandedCardId === cardId ? null : cardId;
+  renderStack();
+}
+
+function collapseCard() {
+  if (state.expandedCardId === null) return;
+  state.expandedCardId = null;
+  renderStack();
+}
+
+function viewAllCards() {
+  const rows = state.cardOrder.map((id) => state.cards.find((card) => card.id === id)).filter(Boolean).map((card, index) => `<button type="button" class="card-picker-row ${card.id === state.activeCardId ? 'selected' : ''}" data-select-card="${card.id}" style="${cardColorTokens(card.card_color || '#252827')}">
+    <span class="picker-brand">${brandLabel(card.brand)}</span>
+    <span class="picker-name">${escapeHtml(card.holder_name || 'Card holder')}</span>
+    <span class="picker-number">•••• ${escapeHtml(card.last4)}</span>
+    <span class="picker-position">${index + 1}</span>
+  </button>`).join('');
+  openSheet(`<h3>All cards</h3><p class="hint">Choose a card to bring it to the front.</p><div class="card-picker-list">${rows}</div><button class="submit-btn ghost" type="button" data-close>Close</button>`);
+}
+
 
 function txRow(t, withDelete) {
   return `<div class="tx">
@@ -182,27 +350,14 @@ function renderCards() {
     return;
   }
   el.innerHTML = state.cards
-    .map(
-      (c) => `<div class="credit-card" style="background:${CARD_THEMES[c.theme]}">
-        <div class="cc-top">
-          <span class="cc-brand">${brandMark(c.brand)}</span>
-          <span class="cc-num">•••• ${c.last4}</span>
-        </div>
-        <div class="cc-label">Balance</div>
-        <div class="cc-balance">${money(c.balance)}</div>
-        <div class="cc-foot">
-          <div>
-            <div class="cc-label" style="margin-top:0">Name</div>
-            <div class="cc-holder">${escapeHtml(c.holder_name)}</div>
-            <div class="cc-label" style="margin-top:6px">Exp ${String(c.exp_month).padStart(2, '0')}/${String(c.exp_year).slice(-2)}</div>
-          </div>
-          <div class="cc-actions">
-            <button class="chip-btn" data-topup="${c.id}">Top Up</button>
-            <button class="chip-btn danger" data-del-card="${c.id}">Delete</button>
-          </div>
-        </div>
-      </div>`
-    )
+    .map((card) => `<div class="credit-card-entry">
+      ${cardFace(card, 'listed')}
+      <div class="cc-actions">
+        <button class="chip-btn" data-topup="${card.id}">Top Up</button>
+        <button class="chip-btn" data-edit-card="${card.id}">Edit</button>
+        <button class="chip-btn danger" data-del-card="${card.id}">Delete</button>
+      </div>
+    </div>`)
     .join('');
 }
 
@@ -315,41 +470,83 @@ function toast(msg) {
   toastTimer = setTimeout(() => (el.hidden = true), 2600);
 }
 
-/* ---- add card ---- */
+/* ---- add and edit cards ---- */
 function addCardModal() {
-  const opts = state.themes
-    .map((t) => `<button type="button" class="theme-swatch ${t === 'violet' ? 'on' : ''}" data-theme="${t}" style="background:${CARD_THEMES[t]}"></button>`)
-    .join('');
+  openCardModal();
+}
+
+function editCardModal(cardId) {
+  const card = state.cards.find((item) => item.id === Number(cardId));
+  if (!card) return toast('Card not found');
+  openCardModal(card);
+}
+
+function openCardModal(existingCard = null) {
+  const editing = Boolean(existingCard);
+  const initialColor = existingCard?.card_color || '#252827';
+  const initialExpiryYear = existingCard ? String(existingCard.exp_year) : '';
   openSheet(`
-    <h3>Add a Card</h3>
+    <h3>${editing ? 'Edit Card' : 'Add a Card'}</h3>
     <p class="hint">Only the last 4 digits are stored — never a full number, PIN or CVV.</p>
     <form id="card-form">
+      <div class="card-preview" style="${cardColorTokens(initialColor)}"><span>${escapeHtml(existingCard?.card_type || 'Physical Card')}</span><strong>${editing ? money(existingCard.balance) : 'Available balance'}</strong><span>•••• &nbsp; •••• &nbsp; •••• &nbsp; ${escapeHtml(existingCard?.last4 || '0000')}</span></div>
       <div class="field">
         <label>Cardholder name</label>
-        <input name="holder_name" placeholder="e.g. dailyflutterui" required maxlength="60" />
+        <input name="holder_name" placeholder="e.g. dailyflutterui" value="${escapeHtml(existingCard?.holder_name || '')}" required maxlength="60" />
       </div>
       <div class="field">
-        <label>Card number</label>
-        <input name="number" inputmode="numeric" placeholder="4242 4242 4242 4242" required maxlength="23" />
+        <label>${editing ? 'Last four digits' : 'Card number'}</label>
+        <input name="number" inputmode="numeric" placeholder="${editing ? `•••• •••• •••• ${escapeHtml(existingCard.last4)}` : '4242 4242 4242 4242'}" ${editing ? `value="${escapeHtml(existingCard.last4)}" maxlength="4"` : 'required maxlength="23"'} />
+        ${editing ? '<span class="field-hint">For security, the full card number is not stored and cannot be edited.</span>' : ''}
+      </div>
+      <div class="field">
+        <label for="card-network">Network</label>
+        <select id="card-network" name="brand">
+          ${[['visa', 'Visa'], ['mastercard', 'Mastercard'], ['amex', 'American Express'], ['discover', 'Discover']].map(([value, label]) => `<option value="${value}" ${(existingCard?.brand || 'visa') === value ? 'selected' : ''}>${label}</option>`).join('')}
+        </select>
       </div>
       <div class="field-row">
-        <div class="field"><label>Expiry month</label><input name="exp_month" inputmode="numeric" placeholder="08" maxlength="2" required /></div>
-        <div class="field"><label>Expiry year</label><input name="exp_year" inputmode="numeric" placeholder="28" maxlength="4" required /></div>
+        <div class="field"><label>Expiry month</label><input name="exp_month" inputmode="numeric" placeholder="08" maxlength="2" value="${editing ? String(existingCard.exp_month).padStart(2, '0') : ''}" required /></div>
+        <div class="field"><label>Expiry year</label><input name="exp_year" inputmode="numeric" placeholder="28" maxlength="4" value="${editing ? escapeHtml(initialExpiryYear) : ''}" required /></div>
       </div>
-      <div class="field"><label>Starting balance</label><input name="balance" inputmode="decimal" placeholder="0.00" value="0" /></div>
-      <div class="field"><label>Colour</label><div class="theme-pick" id="theme-pick">${opts}</div></div>
+      <div class="field"><label>${editing ? 'Balance' : 'Starting balance'}</label><input name="balance" inputmode="decimal" placeholder="0.00" value="${editing ? Number(existingCard.balance).toFixed(2) : '0'}" /></div>
+      ${editing ? `<div class="field"><label for="card-status">Status</label><select id="card-status" name="status"><option value="active" ${existingCard.status === 'active' ? 'selected' : ''}>Active</option><option value="frozen" ${existingCard.status === 'frozen' ? 'selected' : ''}>Frozen</option><option value="expired" ${existingCard.status === 'expired' ? 'selected' : ''}>Expired</option></select></div>` : ''}
+      <div class="field">
+        <label for="card-color-picker">Card color</label>
+        <div class="card-color-controls">
+          <input id="card-color-picker" type="color" value="${escapeHtml(initialColor)}" aria-label="Choose a custom card color" />
+          <div class="theme-pick" id="theme-pick">${CARD_COLOR_PRESETS.map((color, index) => `<button type="button" class="theme-swatch ${index === 0 ? 'on' : ''}" data-card-color="${color.value}" aria-label="${color.name}" title="${color.name}" style="--swatch-color:${color.value}"></button>`).join('')}</div>
+        </div>
+      </div>
       <div class="form-error" id="card-error"></div>
-      <button class="submit-btn violet" type="submit">Save Card</button>
+      <button class="submit-btn violet" type="submit">${editing ? 'Save Changes' : 'Save Card'}</button>
       <button class="submit-btn ghost" type="button" data-close>Cancel</button>
     </form>`);
 
-  let theme = 'violet';
+  let cardColor = initialColor;
+  const colorPicker = sheet.querySelector('#card-color-picker');
+  const holderInput = sheet.querySelector('[name="holder_name"]');
+  const numberInput = sheet.querySelector('[name="number"]');
+  const balanceInput = sheet.querySelector('[name="balance"]');
+  const preview = sheet.querySelector('.card-preview');
+  const updatePreview = () => {
+    preview.innerHTML = `<span>${escapeHtml(existingCard?.card_type || 'Physical Card')}</span><strong>${editing ? money(Number(balanceInput.value) || 0) : 'Available balance'}</strong><span>•••• &nbsp; •••• &nbsp; •••• &nbsp; ${escapeHtml(numberInput.value.replace(/\D/g, '').slice(-4) || '0000')}</span>`;
+    preview.style.cssText = cardColorTokens(cardColor);
+    preview.style.color = getCardTextColor(cardColor);
+  };
+  [holderInput, numberInput, balanceInput].forEach((input) => input.addEventListener('input', updatePreview));
+  updatePreview();
+  const updateCardColor = (color) => {
+    cardColor = color;
+    colorPicker.value = color;
+    sheet.querySelectorAll('[data-card-color]').forEach((swatch) => swatch.classList.toggle('on', swatch.dataset.cardColor === color));
+    updatePreview();
+  };
   sheet.querySelector('#theme-pick').addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-theme]');
-    if (!btn) return;
-    theme = btn.dataset.theme;
-    sheet.querySelectorAll('.theme-swatch').forEach((s) => s.classList.toggle('on', s === btn));
+    const btn = e.target.closest('[data-card-color]');
+    if (btn) updateCardColor(btn.dataset.cardColor);
   });
+  colorPicker.addEventListener('input', () => updateCardColor(colorPicker.value));
 
   sheet.querySelector('#card-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -357,21 +554,30 @@ function addCardModal() {
     const err = sheet.querySelector('#card-error');
     err.textContent = '';
     try {
-      const { card } = await api('/api/cards', {
-        method: 'POST',
-        body: {
-          holder_name: f.get('holder_name'),
-          number: String(f.get('number')).replace(/[\s-]/g, ''),
-          exp_month: f.get('exp_month'),
-          exp_year: f.get('exp_year'),
-          balance: Number(f.get('balance')) || 0,
-          theme,
-        },
-      });
-      state.activeCardId = card.id;
+      const body = {
+        holder_name: f.get('holder_name'),
+        exp_month: f.get('exp_month'),
+        exp_year: f.get('exp_year'),
+        balance: Number(f.get('balance')) || 0,
+        card_color: cardColor,
+        brand: f.get('brand'),
+      };
+      let card;
+      if (editing) {
+        body.last4 = String(f.get('number')).replace(/\D/g, '').slice(-4);
+        body.status = f.get('status');
+        ({ card } = await api(`/api/cards/${existingCard.id}`, { method: 'PUT', body }));
+      } else {
+        body.number = String(f.get('number')).replace(/[\s-]/g, '');
+        ({ card } = await api('/api/cards', { method: 'POST', body }));
+      }
+      if (!editing) state.activeCardId = card.id;
+      state.cardOrder = state.cardOrder.filter((id) => id !== card.id);
+      if (!editing) state.cardOrder.unshift(card.id);
+      state.expandedCardId = null;
       closeSheet();
       await refresh();
-      toast('Card added');
+      toast(editing ? 'Card updated' : 'Card added');
     } catch (err2) {
       err.textContent = err2.message;
     }
@@ -581,19 +787,91 @@ $('#reset-btn').addEventListener('click', async () => {
   toast('All data wiped');
 });
 
+let deckTouchStartX = null;
+$('#card-stack').addEventListener('touchstart', (e) => {
+  deckTouchStartX = e.changedTouches[0].clientX;
+}, { passive: true });
+$('#card-stack').addEventListener('touchend', (e) => {
+  if (deckTouchStartX === null || state.cards.length < 2) return;
+  const deltaX = e.changedTouches[0].clientX - deckTouchStartX;
+  deckTouchStartX = null;
+  if (Math.abs(deltaX) < 45) return;
+  if (state.expandedCardId !== null) collapseCard();
+  const current = state.cardOrder.indexOf(state.activeCardId);
+  const next = (current + (deltaX < 0 ? 1 : -1) + state.cardOrder.length) % state.cardOrder.length;
+  selectCard(state.cardOrder[next]);
+}, { passive: true });
+
+document.body.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') collapseCard();
+});
+
+document.addEventListener('click', (e) => {
+  if (state.expandedCardId !== null && !e.target.closest('#card-stack')) collapseCard();
+});
+
 document.body.addEventListener('click', async (e) => {
+  const balanceToggle = e.target.closest('[data-toggle-balance]');
+  if (balanceToggle) {
+    toggleCardBalance();
+    return;
+  }
+
+  const collapseButton = e.target.closest('[data-collapse-card]');
+  if (collapseButton) {
+    collapseCard();
+    return;
+  }
+
+  const expandedFace = e.target.closest('.physical-card-face.is-expanded');
+  if (expandedFace) {
+    collapseCard();
+    return;
+  }
+
+  const expandButton = e.target.closest('[data-toggle-expand]');
+  if (expandButton) {
+    toggleCardExpanded(expandButton.dataset.toggleExpand);
+    return;
+  }
+
+  const viewCards = e.target.closest('[data-view-cards]');
+  if (viewCards) return viewAllCards();
+
+  const expandedChoice = e.target.closest('[data-expanded-card-choice]');
+  if (expandedChoice) {
+    const id = Number(expandedChoice.dataset.expandedCardChoice);
+    if (id !== state.activeCardId) {
+      state.activeCardId = id;
+      state.expandedCardId = id;
+      state.cardOrder = [id, ...state.cardOrder.filter((cardId) => cardId !== id)];
+      state.cardSelectionChanged = true;
+      renderStack();
+    }
+    return;
+  }
+
+  const cardChoice = e.target.closest('[data-select-card]');
+  if (cardChoice) {
+    selectCard(cardChoice.dataset.selectCard);
+    closeSheet();
+    return;
+  }
+
   const open = e.target.closest('[data-open="add-card"]');
   if (open) return addCardModal();
 
   const mini = e.target.closest('[data-card]');
   if (mini) {
-    state.activeCardId = Number(mini.dataset.card);
-    renderStack();
+    selectCard(mini.dataset.card);
     return;
   }
 
   const topBtn = e.target.closest('[data-topup]');
   if (topBtn) return topUpModal(Number(topBtn.dataset.topup));
+
+  const editCard = e.target.closest('[data-edit-card]');
+  if (editCard) return editCardModal(editCard.dataset.editCard);
 
   const delCard = e.target.closest('[data-del-card]');
   if (delCard) {

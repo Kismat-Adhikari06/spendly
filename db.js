@@ -19,6 +19,10 @@ db.exec(`
     exp_year    INTEGER NOT NULL,
     balance     REAL    NOT NULL DEFAULT 0,
     theme       TEXT    NOT NULL DEFAULT 'violet',
+    card_color  TEXT    NOT NULL DEFAULT '#252827',
+    card_type   TEXT    NOT NULL DEFAULT 'Physical Card',
+    currency    TEXT    NOT NULL DEFAULT 'USD',
+    status      TEXT    NOT NULL DEFAULT 'active',
     created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -36,6 +40,20 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_tx_card   ON transactions(card_id);
   CREATE INDEX IF NOT EXISTS idx_tx_spent  ON transactions(spent_at);
 `);
+
+const cardColumns = db.prepare('PRAGMA table_info(cards)').all().map((column) => column.name);
+if (!cardColumns.includes('card_color')) {
+  db.exec("ALTER TABLE cards ADD COLUMN card_color TEXT NOT NULL DEFAULT '#252827'");
+}
+if (!cardColumns.includes('card_type')) {
+  db.exec("ALTER TABLE cards ADD COLUMN card_type TEXT NOT NULL DEFAULT 'Physical Card'");
+}
+if (!cardColumns.includes('currency')) {
+  db.exec("ALTER TABLE cards ADD COLUMN currency TEXT NOT NULL DEFAULT 'USD'");
+}
+if (!cardColumns.includes('status')) {
+  db.exec("ALTER TABLE cards ADD COLUMN status TEXT NOT NULL DEFAULT 'active'");
+}
 
 function transaction(fn) {
   return (...args) => {

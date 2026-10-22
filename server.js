@@ -22,6 +22,10 @@ function sanitizeCard(card) {
     exp_year: card.exp_year,
     balance: Number(card.balance),
     theme: card.theme,
+    card_color: card.card_color || '#252827',
+    card_type: card.card_type || 'Physical Card',
+    currency: card.currency || 'USD',
+    status: card.status || 'active',
   };
 }
 
@@ -45,7 +49,7 @@ app.get('/api/cards', (req, res) => {
 });
 
 app.post('/api/cards', (req, res) => {
-  const { holder_name, number, exp_month, exp_year, balance, theme } = req.body || {};
+  const { holder_name, number, exp_month, exp_year, balance, theme, card_color, brand } = req.body || {};
 
   if (!holder_name || typeof holder_name !== 'string' || !holder_name.trim()) {
     return bad(res, 'Cardholder name is required.');
@@ -54,6 +58,8 @@ app.post('/api/cards', (req, res) => {
   if (!/^\d{12,19}$/.test(digits)) {
     return bad(res, 'Card number must be 12-19 digits.');
   }
+  const supportedBrands = ['visa', 'mastercard', 'amex', 'discover'];
+  if (brand !== undefined && !supportedBrands.includes(brand)) return bad(res, 'Choose a supported card network.');
   const m = Number(exp_month);
   const y = Number(exp_year);
   if (!Number.isInteger(m) || m < 1 || m > 12) return bad(res, 'Invalid expiry month.');
@@ -68,24 +74,71 @@ app.post('/api/cards', (req, res) => {
   const startBalance = Number(balance);
   if (!Number.isFinite(startBalance) || startBalance < 0) return bad(res, 'Invalid balance.');
 
+  const color = typeof card_color === 'string' && /^#[0-9a-fA-F]{6}$/.test(card_color)
+    ? card_color.toLowerCase()
+    : '#252827';
+
   // Only the last four digits are ever persisted.
   const info = db
     .prepare(
-      `INSERT INTO cards (holder_name, brand, last4, exp_month, exp_year, balance, theme)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO cards (holder_name, brand, last4, exp_month, exp_year, balance, theme, card_color)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       holder_name.trim().slice(0, 60),
-      detectBrand(digits),
+      brand || detectBrand(digits),
       digits.slice(-4),
       m,
       fullYear,
       startBalance,
-      THEMES.includes(theme) ? theme : 'violet'
+      THEMES.includes(theme) ? theme : 'violet',
+      color
     );
 
   const card = db.prepare('SELECT * FROM cards WHERE id = ?').get(info.lastInsertRowid);
   res.status(201).json({ card: sanitizeCard(card) });
+});
+
+app.put('/api/cards/:id', (req, res) => {
+  const id = Number(req.params.id);
+  const existing = db.prepare('SELECT * FROM cards WHERE id = ?').get(id);
+  if (!existing) return bad(res, 'Card not found.');
+
+  const { holder_name, exp_month, exp_year, balance, card_color, last4, status, brand } = req.body || {};
+  if (typeof holder_name !== 'string' || !holder_name.trim()) {
+    return bad(res, 'Cardholder name is required.');
+  }
+  const month = Number(exp_month);
+  const yearInput = Number(exp_year);
+  if (!Number.isInteger(month) || month < 1 || month > 12) return bad(res, 'Invalid expiry month.');
+  if (!Number.isInteger(yearInput) || yearInput < 0 || yearInput > 9999) return bad(res, 'Invalid expiry year.');
+  const year = yearInput < 100 ? 2000 + yearInput : yearInput;
+  const updatedBalance = Number(balance);
+  if (!Number.isFinite(updatedBalance) || updatedBalance < 0) return bad(res, 'Invalid balance.');
+  if (last4 !== undefined && !/^\d{4}$/.test(String(last4))) return bad(res, 'Last four digits must be exactly 4 digits.');
+  if (card_color !== undefined && (typeof card_color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(card_color))) {
+    return bad(res, 'Invalid card color.');
+  }
+  const validStatuses = ['active', 'frozen', 'expired'];
+  if (status !== undefined && !validStatuses.includes(status)) return bad(res, 'Invalid card status.');
+  const supportedBrands = ['visa', 'mastercard', 'amex', 'discover'];
+  if (brand !== undefined && !supportedBrands.includes(brand)) return bad(res, 'Choose a supported card network.');
+
+  db.prepare(`UPDATE cards
+    SET holder_name = ?, brand = ?, last4 = ?, exp_month = ?, exp_year = ?, balance = ?, card_color = ?, status = ?
+    WHERE id = ?`).run(
+      holder_name.trim().slice(0, 60),
+      brand === undefined ? existing.brand : brand,
+      last4 === undefined ? existing.last4 : String(last4),
+      month,
+      year,
+      updatedBalance,
+      card_color === undefined ? existing.card_color : card_color.toLowerCase(),
+      status === undefined ? existing.status : status,
+      id
+    );
+  const card = db.prepare('SELECT * FROM cards WHERE id = ?').get(id);
+  res.json({ card: sanitizeCard(card) });
 });
 
 app.delete('/api/cards/:id', (req, res) => {
