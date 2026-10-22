@@ -74,11 +74,16 @@ app.post('/api/cards', (req, res) => {
     const account = db.prepare('SELECT * FROM cards WHERE id = ?').get(info.lastInsertRowid);
     return res.status(201).json({ card: sanitizeCard(account) });
   }
-  const digits = String(number || '').replace(/[\s-]/g, '');
-  if (!/^\d{12,19}$/.test(digits)) {
-    return bad(res, 'Card number must be 12-19 digits.');
+  const storeFull = db.prepare("SELECT value FROM app_settings WHERE key = 'store_full_card_numbers'").get()?.value === 'true';
+  const rawNumber = String(number || '').trim();
+  let digits;
+  if (storeFull) {
+    digits = rawNumber.replace(/[\s-]/g, '');
+    if (!/^[0-9 -]+$/.test(rawNumber) || !/^\d{12,19}$/.test(digits)) return bad(res, 'Storage is on: enter the complete card number with 12-19 digits.');
+  } else {
+    if (!/^\d{4}$/.test(rawNumber)) return bad(res, 'Storage is off: enter only the last four digits.');
+    digits = rawNumber;
   }
-  if (!/^[0-9 -]+$/.test(String(number))) return bad(res, 'Card number must contain digits only, with optional spaces or dashes.');
   const supportedBrands = ['visa', 'mastercard', 'amex', 'discover'];
   if (brand !== undefined && !supportedBrands.includes(brand)) return bad(res, 'Choose a supported card network.');
   const m = Number(exp_month);
@@ -97,7 +102,6 @@ app.post('/api/cards', (req, res) => {
     ? card_color.toLowerCase()
     : '#252827';
 
-  const storeFull = db.prepare("SELECT value FROM app_settings WHERE key = 'store_full_card_numbers'").get()?.value === 'true';
   const fullDigits = storeFull ? digits : null;
   const info = db
     .prepare(
@@ -176,16 +180,23 @@ app.put('/api/cards/:id', (req, res) => {
   const rawFull = String(full_number || '');
   if (rawFull && !/^[0-9 -]+$/.test(rawFull)) return bad(res, 'Card number must contain digits only, with optional spaces or dashes.');
   const requestedFull = rawFull.replace(/[\s-]/g, '');
-  if (rawFull && !/^\d{12,19}$/.test(requestedFull)) return bad(res, 'Full card number must be 12-19 digits.');
-  if (rawFull && !storeFull) return bad(res, 'Full-number storage is turned off. Enable it in Profile to save a complete card number.');
-  if (rawFull && String(last4) !== requestedFull.slice(-4)) return bad(res, 'Last four digits must match the complete card number.');
-  const updatedFull = storeFull && requestedFull ? requestedFull : existing.full_number;
+  let updatedLast4 = last4 === undefined ? existing.last4 : String(last4);
+  const last4Only = last4 !== undefined && updatedLast4 !== existing.last4;
+  if (storeFull && rawFull && !/^\d{12,19}$/.test(requestedFull)) return bad(res, 'Full card number must be 12-19 digits.');
+  if (!storeFull && (rawFull || last4Only)) {
+    if (rawFull && !/^\d{4}$/.test(requestedFull)) return bad(res, 'Full-number storage is off: enter exactly the last four digits.');
+    if (last4Only && !/^\d{4}$/.test(updatedLast4)) return bad(res, 'When full-number storage is off, enter exactly the last four digits.');
+    updatedLast4 = rawFull ? requestedFull : updatedLast4;
+  }
+  if (storeFull && rawFull && updatedLast4 !== requestedFull.slice(-4)) return bad(res, 'Last four digits must match the complete card number.');
+  let updatedFull = storeFull && rawFull ? requestedFull : existing.full_number;
+  if (!storeFull && (rawFull || last4Only)) updatedFull = null;
   db.prepare(`UPDATE cards
     SET holder_name = ?, brand = ?, last4 = ?, full_number = ?, exp_month = ?, exp_year = ?, balance = ?, card_color = ?, status = ?
     WHERE id = ?`).run(
       holder_name.trim().slice(0, 60),
       brand === undefined ? existing.brand : brand,
-      last4 === undefined ? existing.last4 : String(last4),
+      updatedLast4,
       storeFull ? updatedFull : null,
       month,
       year,

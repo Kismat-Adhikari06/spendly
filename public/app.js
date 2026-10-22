@@ -520,7 +520,6 @@ function openCardModal(existingCard = null) {
   openSheet(`
     <h3>${editing ? `Edit ${initialKind === 'account' ? 'Account' : 'Card'}` : 'Add a Card or Account'}</h3>
     <p class="hint">Track a payment card, bank account, or mobile wallet manually. Never enter a PIN or password.</p>
-    ${!editing && !state.storeFullCardNumbers ? '<p class="number-storage-hint">Only the last four card digits will be saved. Turn on full-number storage in Profile if you want to reveal the whole number later.</p>' : ''}
     <form id="card-form">
       ${editing ? '' : `<div class="field"><label for="item-kind">What are you adding?</label><select id="item-kind" name="kind"><option value="card">Payment card</option><option value="account">Bank or mobile wallet account</option></select></div>`}
       <div class="card-preview" style="${cardColorTokens(initialColor)}"><span>${escapeHtml(existingCard?.card_type || 'Physical Card')}</span><strong>${editing ? money(existingCard.balance, existingCard.currency || state.displayCurrency) : 'Available balance'}</strong><span>•••• &nbsp; •••• &nbsp; •••• &nbsp; ${escapeHtml(existingCard?.last4 || '0000')}</span></div>
@@ -529,9 +528,9 @@ function openCardModal(existingCard = null) {
         <input name="holder_name" placeholder="e.g. Your name" value="${escapeHtml(existingCard?.holder_name || '')}" required maxlength="60" />
       </div>
       <div class="field" data-card-field>
-        <label>Full card number</label>
-        <input name="number" type="text" inputmode="numeric" placeholder="${editing ? `Enter full number ending ${escapeHtml(existingCard.last4)}` : '4242 4242 4242 4242'}" ${editing ? 'maxlength="23"' : 'required maxlength="23"'} autocomplete="off" />
-        <span class="field-hint">${state.storeFullCardNumbers ? 'Full-number storage is on. The complete number you enter will be saved, then masked on the card until you tap the eye.' : 'Full-number storage is off. Only the last four digits will be saved. Enable it in Profile to save the complete number.'}</span>
+        <label>${state.storeFullCardNumbers ? 'Full card number' : 'Last four digits'}</label>
+        <input name="number" type="text" inputmode="numeric" placeholder="${state.storeFullCardNumbers ? (editing ? `Enter full number ending ${escapeHtml(existingCard.last4)}` : '4242 4242 4242 4242') : (editing ? `Current ending: ${escapeHtml(existingCard.last4)}` : '1234')}" ${editing ? `maxlength="${state.storeFullCardNumbers ? '23' : '4'}"` : `required maxlength="${state.storeFullCardNumbers ? '23' : '4'}"`} autocomplete="off" />
+        <span class="field-hint" data-number-storage-hint>${state.storeFullCardNumbers ? 'Storage is on. Enter all 12–19 digits; the saved number stays hidden on Home until you tap the eye.' : 'Storage is off. Enter only the last four digits; no other card digits will be saved.'}</span>
       </div>
       <div class="field" data-account-field hidden><label>Account type</label><select name="account_kind"><option value="bank" ${existingCard?.account_kind === 'bank' ? 'selected' : ''}>Bank account</option><option value="mobile_wallet" ${existingCard?.account_kind === 'mobile_wallet' ? 'selected' : ''}>Mobile wallet (eSewa, etc.)</option></select></div>
       <div class="field" data-account-field hidden><label>Bank or wallet name</label><input name="provider" placeholder="e.g. Global IME Bank or eSewa" value="${escapeHtml(existingCard?.provider || '')}" maxlength="60" /></div>
@@ -569,10 +568,28 @@ function openCardModal(existingCard = null) {
   const setKindFields = (kind) => {
     sheet.querySelectorAll('[data-card-field]').forEach((field) => { field.hidden = kind !== 'card'; });
     sheet.querySelectorAll('[data-account-field]').forEach((field) => { field.hidden = kind !== 'account'; });
-    if (numberInput) numberInput.required = kind === 'card' && !editing;
+    if (numberInput) {
+      numberInput.required = kind === 'card' && !editing;
+      numberInput.maxLength = state.storeFullCardNumbers ? 23 : 4;
+    }
     sheet.querySelectorAll('[data-card-field] input[name="exp_month"], [data-card-field] input[name="exp_year"]').forEach((input) => { input.required = kind === 'card' && !editing; });
   };
+  const updateNumberMode = () => {
+    if (!numberInput) return;
+    const fullStorage = state.storeFullCardNumbers;
+    const numberLabel = sheet.querySelector('[data-card-field] label:not([for])');
+    if (numberLabel) numberLabel.textContent = fullStorage ? 'Full card number' : 'Last four digits';
+    numberInput.maxLength = fullStorage ? 23 : 4;
+    numberInput.placeholder = fullStorage
+      ? (editing ? `Enter full number ending ${existingCard.last4}` : '4242 4242 4242 4242')
+      : (editing ? `Current ending: ${existingCard.last4}` : '1234');
+    const hint = sheet.querySelector('[data-number-storage-hint]');
+    if (hint) hint.textContent = fullStorage
+      ? 'Storage is on. Enter all 12–19 digits; the saved number stays hidden on Home until you tap the eye.'
+      : 'Storage is off. Enter only the last four digits; no other card digits will be saved.';
+  };
   setKindFields(initialKind);
+  updateNumberMode();
   if (kindInput) kindInput.addEventListener('change', () => setKindFields(kindInput.value));
   const balanceInput = sheet.querySelector('[name="balance"]');
   const preview = sheet.querySelector('.card-preview');
@@ -606,6 +623,7 @@ function openCardModal(existingCard = null) {
     err.textContent = '';
     try {
       const kind = editing ? existingCard.kind || 'card' : f.get('kind');
+      const storeFullAtSubmit = state.storeFullCardNumbers;
       const body = {
         kind,
         holder_name: f.get('holder_name'),
@@ -621,21 +639,29 @@ function openCardModal(existingCard = null) {
       if (editing) {
         body.status = f.get('status');
         if (kind === 'card') {
-          const rawNumber = String(f.get('number') || '');
+          const rawNumber = String(f.get('number') || '').trim();
           const enteredNumber = rawNumber.replace(/\D/g, '');
-          if (rawNumber && !/^[0-9 -]+$/.test(rawNumber)) throw new Error('Card number may contain only digits, spaces, or dashes.');
-          if (rawNumber && (enteredNumber.length < 12 || enteredNumber.length > 19)) throw new Error('Enter the complete card number (12-19 digits), or leave it blank to keep the current one.');
-          if (rawNumber && !state.storeFullCardNumbers) throw new Error('Full-number storage is off. Only the last four digits are saved; enable full-number storage in Profile to save the complete number.');
-          body.last4 = enteredNumber ? enteredNumber.slice(-4) : existingCard.last4;
-          if (enteredNumber) body.full_number = enteredNumber;
+          if (storeFullAtSubmit) {
+            if (rawNumber && !/^[0-9 -]+$/.test(rawNumber)) throw new Error('Card number may contain only digits, spaces, or dashes.');
+            if (rawNumber && (enteredNumber.length < 12 || enteredNumber.length > 19)) throw new Error('Enter the complete card number (12-19 digits), or leave it blank to keep the current one.');
+            body.last4 = enteredNumber ? enteredNumber.slice(-4) : existingCard.last4;
+            if (enteredNumber) body.full_number = enteredNumber;
+          } else {
+            if (rawNumber && !/^\d{4}$/.test(rawNumber)) throw new Error('Storage is off: enter exactly the last four digits.');
+            body.last4 = rawNumber || existingCard.last4;
+          }
         }
         ({ card } = await api(`/api/cards/${existingCard.id}`, { method: 'PUT', body }));
       } else {
         if (kind === 'card') {
-          const rawNumber = String(f.get('number') || '');
+          const rawNumber = String(f.get('number') || '').trim();
           const digits = rawNumber.replace(/\D/g, '');
-          if (!/^[0-9 -]+$/.test(rawNumber) || digits.length < 12 || digits.length > 19) throw new Error('Enter a complete card number with 12-19 digits.');
-          body.number = digits;
+          if (storeFullAtSubmit) {
+            if (!/^[0-9 -]+$/.test(rawNumber) || digits.length < 12 || digits.length > 19) throw new Error('Storage is on: enter the complete card number with 12-19 digits.');
+          } else if (!/^\d{4}$/.test(rawNumber)) {
+            throw new Error('Storage is off: enter only the last four digits.');
+          }
+          body.number = storeFullAtSubmit ? digits : rawNumber;
         }
         ({ card } = await api('/api/cards', { method: 'POST', body }));
       }
