@@ -7,6 +7,10 @@ const state = {
   cardOrder: [],
   activeCardId: null,
   hiddenBalances: false,
+  revealedCardId: null,
+  revealedCardNumber: null,
+  storeFullCardNumbers: false,
+  displayCurrency: 'NPR',
   cardSelectionChanged: false,
   expandedCardId: null,
   overview: null,
@@ -15,8 +19,9 @@ const state = {
 };
 
 const $ = (sel) => document.querySelector(sel);
-const money = (n) =>
-  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n || 0);
+const money = (n, currency = state.displayCurrency || 'USD') =>
+  new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(n || 0);
+const transactionMoney = (n) => money(n, state.displayCurrency);
 
 /* ------------------------------------------------------------- theme maps */
 
@@ -171,13 +176,14 @@ function networkLogo(network) {
 }
 
 function formattedBalance(card) {
-  const currency = /^[A-Z]{3}$/.test(card.currency || '') ? card.currency : 'USD';
+  const displayCurrency = state.displayCurrency || 'USD';
+  const currency = displayCurrency;
   const parts = new Intl.NumberFormat('en-US', {
-    style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2,
+    style: 'currency', currency: displayCurrency, minimumFractionDigits: 2, maximumFractionDigits: 2,
   }).formatToParts(Number(card.balance) || 0);
   const decimalIndex = parts.findIndex((part) => part.type === 'decimal');
   const fractionIndex = parts.findIndex((part) => part.type === 'fraction');
-  if (decimalIndex < 0 || fractionIndex < 0) return escapeHtml(new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(Number(card.balance) || 0));
+  if (decimalIndex < 0 || fractionIndex < 0) return escapeHtml(new Intl.NumberFormat('en-US', { style: 'currency', currency: displayCurrency }).format(Number(card.balance) || 0));
   const whole = parts.slice(0, decimalIndex).map((part) => part.value).join('');
   const cents = parts[fractionIndex].value;
   const suffix = parts.slice(fractionIndex + 1).map((part) => part.value).join('');
@@ -185,10 +191,11 @@ function formattedBalance(card) {
 }
 
 function cardFace(card, layer = 'front', expanded = false) {
-  const hidden = state.hiddenBalances;
+  const isAccount = card.kind === 'account';
+  const hidden = !isAccount && state.revealedCardId !== Number(card.id);
   const id = Number(card.id);
   const holder = escapeHtml(card.holder_name || 'Card holder');
-  const type = escapeHtml(card.card_type || card.type || 'Physical Card');
+  const type = escapeHtml(card.card_type || card.type || (isAccount ? 'Bank Account' : 'Physical Card'));
   const colorStyle = cardColorTokens(card.card_color || '#252827', layer === 'back');
   const rawStatus = String(card.status || 'active').toLowerCase();
   const status = ['active', 'frozen', 'expired'].includes(rawStatus) ? rawStatus : 'active';
@@ -204,24 +211,25 @@ function cardFace(card, layer = 'front', expanded = false) {
     </div>
     <div class="physical-card-balance">
       <span class="card-balance-label">Available Balance</span>
-      <span class="card-balance-value ${hidden ? 'is-hidden' : ''}" data-card-balance="${id}" aria-label="${hidden ? 'Balance hidden' : `Balance ${money(card.balance)}`}" aria-live="polite">${hidden ? '••••••' : formattedBalance(card)}</span>
-      <span class="physical-card-number" role="text" aria-label="Card ending in ${escapeHtml(card.last4 || '0000')}"><span aria-hidden="true">•••• &nbsp; •••• &nbsp; •••• &nbsp;</span>${escapeHtml(card.last4 || '0000')}</span>
+      <span class="card-balance-value ${hidden ? 'is-hidden' : ''}" data-card-balance="${id}" aria-label="${hidden ? 'Balance hidden' : `Balance ${money(card.balance, card.currency || state.displayCurrency)}`}" aria-live="polite">${hidden ? '••••••' : formattedBalance(card)}</span>
+      <span class="physical-card-number" role="text" aria-label="${isAccount ? 'Account' : 'Card'} ending in ${escapeHtml(card.last4 || '0000')}">${!isAccount && !hidden && state.revealedCardNumber ? escapeHtml(state.revealedCardNumber) : `<span aria-hidden="true">•••• &nbsp; •••• &nbsp; •••• &nbsp;</span>${escapeHtml(card.last4 || '0000')}`}</span>
     </div>
     <div class="physical-card-details">
-      <div class="card-holder"><span>Card Holder</span><strong>${holder}</strong></div>
-      <div class="card-expiry"><span>Expires</span><strong>${String(card.exp_month || 1).padStart(2, '0')}/${card.exp_year || '----'}</strong></div>
-      <div class="network-logo-wrap">${networkLogo(card.brand)}</div>
+      <div class="card-holder"><span>${isAccount ? escapeHtml(card.provider || 'Account holder') : 'Card Holder'}</span><strong>${holder}</strong></div>
+      <div class="card-expiry"><span>${isAccount ? 'Type' : 'Expires'}</span><strong>${isAccount ? escapeHtml(card.account_kind === 'mobile_wallet' ? 'Wallet' : 'Bank') : `${String(card.exp_month || 1).padStart(2, '0')}/${card.exp_year || '----'}`}</strong></div>
+      <div class="network-logo-wrap">${isAccount ? `<span class="account-mark">${escapeHtml(card.provider || 'ACCOUNT')}</span>` : networkLogo(card.brand)}</div>
     </div>
     ${expanded ? `<div class="expanded-card-details" aria-label="Card details expanded">
       <div class="expanded-details-heading"><span>Card details</span><span role="status" aria-live="polite">Card details expanded</span></div>
       <dl>
         <div><dt>Type</dt><dd>${type}</dd></div>
-        <div><dt>Network</dt><dd>${escapeHtml(brandLabel(card.brand))}</dd></div>
+        <div><dt>${isAccount ? 'Provider' : 'Network'}</dt><dd>${escapeHtml(isAccount ? card.provider || '' : brandLabel(card.brand))}</dd></div>
+        ${isAccount ? `        <div><dt>Account number</dt><dd>${escapeHtml(card.account_number || '')}</dd></div>` : ''}
         <div><dt>Status</dt><dd>${escapeHtml(status.charAt(0).toUpperCase() + status.slice(1))}</dd></div>
-        <div><dt>Card number</dt><dd>•••• ${escapeHtml(card.last4 || '0000')}</dd></div>
+        <div><dt>Card number</dt><dd>${isAccount ? escapeHtml(card.account_number || '') : (!hidden && state.revealedCardNumber ? escapeHtml(state.revealedCardNumber) : `•••• ${escapeHtml(card.last4 || '0000')}`)}</dd></div>
         <div><dt>Expires</dt><dd>${String(card.exp_month || 1).padStart(2, '0')}/${card.exp_year || '----'}</dd></div>
         <div><dt>Cardholder</dt><dd>${holder}</dd></div>
-        <div><dt>Currency</dt><dd>${escapeHtml(card.currency || 'USD')}</dd></div>
+        <div><dt>Currency</dt><dd>${escapeHtml(card.currency || state.displayCurrency || 'USD')}</dd></div>
       </dl>
     </div>` : ''}
   </div>`;
@@ -230,10 +238,13 @@ function cardFace(card, layer = 'front', expanded = false) {
 function renderStack() {
   const el = $('#card-stack');
   if (!state.cards.length) {
-    const emptyCard = { id: 'empty', brand: 'card', balance: 0, last4: '0000', holder_name: 'Add a card to begin', exp_month: 1, exp_year: '----', theme: 'slate', card_color: '#252827' };
-    el.innerHTML = `<div class="card-deck empty-deck">${cardFace(emptyCard)}<button class="add-card-btn" data-open="add-card">+ Add Card</button></div>`;
+    el.innerHTML = `<button type="button" class="empty-card-placeholder" data-open="add-card" aria-label="Add a card or account"><span class="empty-card-outline" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="3"/><line x1="2" y1="9" x2="22" y2="9"/></svg></span><span class="empty-card-copy"><strong>No cards or accounts yet</strong><span>Add one to start tracking your balances and expenses.</span></span><span class="empty-card-arrow" aria-hidden="true">+</span></button>`;
+    el.classList.add('is-empty');
+    el.classList.remove('has-expanded-card');
+    el.setAttribute('aria-expanded', 'false');
     return;
   }
+  el.classList.remove('is-empty');
 
   const orderedCards = state.cardOrder.map((id) => state.cards.find((card) => card.id === id)).filter(Boolean);
   const active = orderedCards.find((card) => card.id === state.activeCardId) || orderedCards[0];
@@ -249,7 +260,7 @@ function renderStack() {
     ${cardFace(active, 'front', isExpanded)}
   </article>`;
   const expandedPicker = isExpanded ? `<section class="expanded-card-chooser" aria-label="Choose a card to bring to the front">
-    <h3>Your cards <span>${orderedCards.length}</span></h3>
+    <h3>Cards &amp; accounts <span>${orderedCards.length}</span></h3>
     <div class="expanded-card-options">
       ${orderedCards.map((card, index) => `<button type="button" class="expanded-card-option ${card.id === active.id ? 'selected' : ''}" data-expanded-card-choice="${card.id}" aria-pressed="${card.id === active.id}" aria-label="${escapeHtml(card.holder_name || 'Card')}, ending in ${escapeHtml(card.last4 || '0000')}${card.id === active.id ? ', currently in front' : ', bring to front'}" style="${cardColorTokens(card.card_color || '#252827')}">
         <span class="option-card-top"><span>${escapeHtml(card.card_type || 'Physical Card')}</span>${networkLogo(card.brand)}</span>
@@ -263,15 +274,15 @@ function renderStack() {
       const isFront = card.id === active.id;
       const layer = isFront ? 'front' : `back back-${index}`;
       return `<article class="stack-card ${layer} ${state.cardSelectionChanged && isFront ? 'card-selected' : ''}" data-stack-layer="${index}" style="z-index:${index + 1}">
-        ${isFront ? `<button type="button" class="front-card-toggle" data-toggle-expand="${card.id}" aria-label="Card ending in ${escapeHtml(card.last4)}, tap to expand" aria-expanded="false"></button>` : ''}
+        ${isFront ? `<button type="button" class="front-card-toggle" data-toggle-expand="${card.id}" aria-label="${card.kind === 'account' ? 'Account' : 'Card'} ending in ${escapeHtml(card.last4)}, tap to expand" aria-expanded="false"></button>` : ''}
         ${cardFace(card, layer)}
-        ${isFront ? '' : `<button type="button" class="stack-card-select" data-card="${card.id}" aria-label="Card ending in ${escapeHtml(card.last4)}, select to view"></button>`}
+        ${isFront ? '' : `<button type="button" class="stack-card-select" data-card="${card.id}" aria-label="${card.kind === 'account' ? 'Account' : 'Card'} ending in ${escapeHtml(card.last4)}, select to view"></button>`}
       </article>`;
     }).join('')}`}
     </div>
     ${expandedPicker}
     <div class="stack-footer">
-      <span class="stack-position" role="status" aria-live="polite" aria-atomic="true">Card ${activeIndex + 1} of ${orderedCards.length}</span>
+      <span class="stack-position" role="status" aria-live="polite" aria-atomic="true">${active.kind === 'account' ? 'Account' : 'Card'} ${activeIndex + 1} of ${orderedCards.length}</span>
       ${!isExpanded && orderedCards.length > 3 ? '<button type="button" class="view-all-cards" data-view-cards>View all cards</button>' : ''}
     </div>`;
   state.cardSelectionChanged = false;
@@ -279,8 +290,23 @@ function renderStack() {
   el.setAttribute('aria-expanded', String(isExpanded));
 }
 
-function toggleCardBalance() {
-  state.hiddenBalances = !state.hiddenBalances;
+async function toggleCardBalance(cardId) {
+  const card = state.cards.find((item) => item.id === Number(cardId));
+  if (!card || card.kind !== 'card') return;
+  if (state.revealedCardId === card.id) {
+    state.revealedCardId = null;
+    state.revealedCardNumber = null;
+  } else {
+    state.revealedCardId = card.id;
+    try {
+      const result = await api(`/api/cards/${card.id}/number`);
+      state.revealedCardNumber = result.number;
+    } catch (err) {
+      state.revealedCardId = null;
+      state.revealedCardNumber = null;
+      toast(err.message);
+    }
+  }
   renderStack();
   renderCards();
 }
@@ -307,12 +333,12 @@ function collapseCard() {
 
 function viewAllCards() {
   const rows = state.cardOrder.map((id) => state.cards.find((card) => card.id === id)).filter(Boolean).map((card, index) => `<button type="button" class="card-picker-row ${card.id === state.activeCardId ? 'selected' : ''}" data-select-card="${card.id}" style="${cardColorTokens(card.card_color || '#252827')}">
-    <span class="picker-brand">${brandLabel(card.brand)}</span>
+    <span class="picker-brand">${card.kind === 'account' ? escapeHtml(card.provider || 'Account') : brandLabel(card.brand)}</span>
     <span class="picker-name">${escapeHtml(card.holder_name || 'Card holder')}</span>
     <span class="picker-number">•••• ${escapeHtml(card.last4)}</span>
     <span class="picker-position">${index + 1}</span>
   </button>`).join('');
-  openSheet(`<h3>All cards</h3><p class="hint">Choose a card to bring it to the front.</p><div class="card-picker-list">${rows}</div><button class="submit-btn ghost" type="button" data-close>Close</button>`);
+  openSheet(`<h3>All cards &amp; accounts</h3><p class="hint">Choose one to bring it to the front.</p><div class="card-picker-list">${rows}</div><button class="submit-btn ghost" type="button" data-close>Close</button>`);
 }
 
 
@@ -321,9 +347,9 @@ function txRow(t, withDelete) {
     <div class="tx-ico">${icon(t.category)}</div>
     <div class="tx-main">
       <div class="tx-title">${escapeHtml(t.title)}</div>
-      <div class="tx-meta">${fmtDate(t.spent_at)}</div>
+      <div class="tx-meta">${fmtDate(t.spent_at)} · ${escapeHtml(t.kind === 'account' ? t.provider || 'Account' : `${brandLabel(t.brand)} •••• ${t.last4 || ''}`)}</div>
     </div>
-    <div class="tx-amt ${t.type === 'income' ? 'income' : ''}">${money(t.amount)}</div>
+    <div class="tx-amt ${t.type === 'income' ? 'income' : ''}">${transactionMoney(t.amount)}</div>
     ${
       withDelete
         ? `<button class="tx-del" data-del="${t.id}" aria-label="Delete">
@@ -339,21 +365,21 @@ function renderRecent() {
   const list = state.overview ? state.overview.recent : [];
   el.innerHTML = list.length
     ? list.map((t) => txRow(t, false)).join('')
-    : `<div class="empty">No transactions yet. Tap a quick action to add one.</div>`;
+    : `    <div class="empty">No transactions yet. Add an expense or income to start tracking.</div>`;
 }
 
 function renderCards() {
   const el = $('#cards-grid');
-  $('#cards-sub').textContent = `${state.cards.length} card${state.cards.length === 1 ? '' : 's'} linked`;
+  $('#cards-sub').textContent = `${state.cards.length} card${state.cards.length === 1 ? '' : 's'} and account${state.cards.length === 1 ? '' : 's'} tracked`;
   if (!state.cards.length) {
-    el.innerHTML = `<div class="panel"><div class="empty">No cards yet — add your first card below.</div></div>`;
+    el.innerHTML = `<div class="panel"><div class="empty">No cards or accounts yet — add your first one below.</div></div>`;
     return;
   }
   el.innerHTML = state.cards
     .map((card) => `<div class="credit-card-entry">
       ${cardFace(card, 'listed')}
       <div class="cc-actions">
-        <button class="chip-btn" data-topup="${card.id}">Top Up</button>
+        <button class="chip-btn" data-topup="${card.id}">${card.kind === 'account' ? 'Add Funds' : 'Top Up'}</button>
         <button class="chip-btn" data-edit-card="${card.id}">Edit</button>
         <button class="chip-btn danger" data-del-card="${card.id}">Delete</button>
       </div>
@@ -364,8 +390,8 @@ function renderCards() {
 function renderStats() {
   const o = state.overview;
   if (!o) return;
-  $('#stat-month-spend').textContent = money(o.month_spend);
-  $('#stat-month-income').textContent = money(o.month_income);
+  $('#stat-month-spend').textContent = transactionMoney(o.month_spend);
+  $('#stat-month-income').textContent = transactionMoney(o.month_income);
 
   // bars
   const bars = $('#bars');
@@ -388,7 +414,7 @@ function renderStats() {
   const donut = $('#donut');
   const cats = o.by_category;
   const total = cats.reduce((s, c) => s + c.total, 0);
-  $('#donut-value').textContent = money(total);
+  $('#donut-value').textContent = transactionMoney(total);
   $('#cat-total').textContent = total ? 'This month' : '';
   const R = 45;
   const C = 2 * Math.PI * R;
@@ -417,7 +443,7 @@ function renderStats() {
         <span class="legend-dot" style="background:${PALETTE[i % PALETTE.length]}"></span>
         <span class="legend-name">${escapeHtml(c.category)}</span>
         <span class="legend-pct">${Math.round((c.total / total) * 100)}%</span>
-        <span class="legend-amt">${money(c.total)}</span>
+        <span class="legend-amt">${transactionMoney(c.total)}</span>
       </div>`
     )
     .join('');
@@ -426,12 +452,17 @@ function renderStats() {
 function renderProfile() {
   const o = state.overview;
   if (!o) return;
+  $('#store-full-card-numbers').checked = state.storeFullCardNumbers;
+  $('#display-currency').value = state.displayCurrency;
+  $('#stat-month-spend').textContent = transactionMoney(o.month_spend);
+  $('#stat-month-income').textContent = transactionMoney(o.month_income);
+  const trackedCount = state.cards.length;
   $('#profile-summary').innerHTML = `
-    <div class="row"><span>Total balance</span><span>${money(o.total_balance)}</span></div>
-    <div class="row"><span>Spent this month</span><span>${money(o.month_spend)}</span></div>
-    <div class="row"><span>Income this month</span><span>${money(o.month_income)}</span></div>
-    <div class="row"><span>Cards linked</span><span>${o.card_count}</span></div>
-    <div class="row"><span>Lifetime spend</span><span>${money(o.total_spend)}</span></div>`;
+    <div class="row"><span>Total balance</span><span>${transactionMoney(o.total_balance)}</span></div>
+    <div class="row"><span>Spent this month</span><span>${transactionMoney(o.month_spend)}</span></div>
+    <div class="row"><span>Income this month</span><span>${transactionMoney(o.month_income)}</span></div>
+    <div class="row"><span>Cards and accounts</span><span>${trackedCount}</span></div>
+    <div class="row"><span>Lifetime spend</span><span>${transactionMoney(o.total_spend)}</span></div>`;
 }
 
 function escapeHtml(s) {
@@ -485,33 +516,40 @@ function openCardModal(existingCard = null) {
   const editing = Boolean(existingCard);
   const initialColor = existingCard?.card_color || '#252827';
   const initialExpiryYear = existingCard ? String(existingCard.exp_year) : '';
+  const initialKind = existingCard?.kind || 'card';
   openSheet(`
-    <h3>${editing ? 'Edit Card' : 'Add a Card'}</h3>
-    <p class="hint">Only the last 4 digits are stored — never a full number, PIN or CVV.</p>
+    <h3>${editing ? `Edit ${initialKind === 'account' ? 'Account' : 'Card'}` : 'Add a Card or Account'}</h3>
+    <p class="hint">Track a payment card, bank account, or mobile wallet manually. Never enter a PIN or password.</p>
+    ${!editing && !state.storeFullCardNumbers ? '<p class="number-storage-hint">Only the last four card digits will be saved. Turn on full-number storage in Profile if you want to reveal the whole number later.</p>' : ''}
     <form id="card-form">
-      <div class="card-preview" style="${cardColorTokens(initialColor)}"><span>${escapeHtml(existingCard?.card_type || 'Physical Card')}</span><strong>${editing ? money(existingCard.balance) : 'Available balance'}</strong><span>•••• &nbsp; •••• &nbsp; •••• &nbsp; ${escapeHtml(existingCard?.last4 || '0000')}</span></div>
+      ${editing ? '' : `<div class="field"><label for="item-kind">What are you adding?</label><select id="item-kind" name="kind"><option value="card">Payment card</option><option value="account">Bank or mobile wallet account</option></select></div>`}
+      <div class="card-preview" style="${cardColorTokens(initialColor)}"><span>${escapeHtml(existingCard?.card_type || 'Physical Card')}</span><strong>${editing ? money(existingCard.balance, existingCard.currency || state.displayCurrency) : 'Available balance'}</strong><span>•••• &nbsp; •••• &nbsp; •••• &nbsp; ${escapeHtml(existingCard?.last4 || '0000')}</span></div>
       <div class="field">
-        <label>Cardholder name</label>
-        <input name="holder_name" placeholder="e.g. dailyflutterui" value="${escapeHtml(existingCard?.holder_name || '')}" required maxlength="60" />
+        <label>Account holder name</label>
+        <input name="holder_name" placeholder="e.g. Your name" value="${escapeHtml(existingCard?.holder_name || '')}" required maxlength="60" />
       </div>
-      <div class="field">
-        <label>${editing ? 'Last four digits' : 'Card number'}</label>
-        <input name="number" inputmode="numeric" placeholder="${editing ? `•••• •••• •••• ${escapeHtml(existingCard.last4)}` : '4242 4242 4242 4242'}" ${editing ? `value="${escapeHtml(existingCard.last4)}" maxlength="4"` : 'required maxlength="23"'} />
-        ${editing ? '<span class="field-hint">For security, the full card number is not stored and cannot be edited.</span>' : ''}
+      <div class="field" data-card-field>
+        <label>Full card number</label>
+        <input name="number" type="text" inputmode="numeric" placeholder="${editing ? `Enter full number ending ${escapeHtml(existingCard.last4)}` : '4242 4242 4242 4242'}" ${editing ? 'maxlength="23"' : 'required maxlength="23"'} autocomplete="off" />
+        <span class="field-hint">${state.storeFullCardNumbers ? 'Full-number storage is on. The complete number you enter will be saved, then masked on the card until you tap the eye.' : 'Full-number storage is off. Only the last four digits will be saved. Enable it in Profile to save the complete number.'}</span>
       </div>
-      <div class="field">
+      <div class="field" data-account-field hidden><label>Account type</label><select name="account_kind"><option value="bank" ${existingCard?.account_kind === 'bank' ? 'selected' : ''}>Bank account</option><option value="mobile_wallet" ${existingCard?.account_kind === 'mobile_wallet' ? 'selected' : ''}>Mobile wallet (eSewa, etc.)</option></select></div>
+      <div class="field" data-account-field hidden><label>Bank or wallet name</label><input name="provider" placeholder="e.g. Global IME Bank or eSewa" value="${escapeHtml(existingCard?.provider || '')}" maxlength="60" /></div>
+      <div class="field" data-account-field hidden><label>Account / wallet number</label><input name="account_number" inputmode="text" placeholder="Your account number" value="${escapeHtml(existingCard?.account_number || '')}" maxlength="34" /></div>
+      <div class="field" data-account-field hidden><label>Currency</label><input name="currency" value="${escapeHtml(existingCard?.currency || state.displayCurrency)}" maxlength="3" placeholder="${escapeHtml(state.displayCurrency)}" /></div>
+      <div class="field" data-card-field>
         <label for="card-network">Network</label>
         <select id="card-network" name="brand">
           ${[['visa', 'Visa'], ['mastercard', 'Mastercard'], ['amex', 'American Express'], ['discover', 'Discover']].map(([value, label]) => `<option value="${value}" ${(existingCard?.brand || 'visa') === value ? 'selected' : ''}>${label}</option>`).join('')}
         </select>
       </div>
-      <div class="field-row">
-        <div class="field"><label>Expiry month</label><input name="exp_month" inputmode="numeric" placeholder="08" maxlength="2" value="${editing ? String(existingCard.exp_month).padStart(2, '0') : ''}" required /></div>
-        <div class="field"><label>Expiry year</label><input name="exp_year" inputmode="numeric" placeholder="28" maxlength="4" value="${editing ? escapeHtml(initialExpiryYear) : ''}" required /></div>
+      <div class="field-row" data-card-field>
+        <div class="field"><label>Expiry month</label><input name="exp_month" inputmode="numeric" placeholder="08" maxlength="2" value="${editing ? String(existingCard.exp_month).padStart(2, '0') : ''}" ${editing ? '' : 'required'} /></div>
+        <div class="field"><label>Expiry year</label><input name="exp_year" inputmode="numeric" placeholder="28" maxlength="4" value="${editing ? escapeHtml(initialExpiryYear) : ''}" ${editing ? '' : 'required'} /></div>
       </div>
-      <div class="field"><label>${editing ? 'Balance' : 'Starting balance'}</label><input name="balance" inputmode="decimal" placeholder="0.00" value="${editing ? Number(existingCard.balance).toFixed(2) : '0'}" /></div>
+      <div class="field"><label>Current balance</label><input name="balance" inputmode="decimal" placeholder="0.00" value="${editing ? Number(existingCard.balance).toFixed(2) : '0'}" /></div>
       ${editing ? `<div class="field"><label for="card-status">Status</label><select id="card-status" name="status"><option value="active" ${existingCard.status === 'active' ? 'selected' : ''}>Active</option><option value="frozen" ${existingCard.status === 'frozen' ? 'selected' : ''}>Frozen</option><option value="expired" ${existingCard.status === 'expired' ? 'selected' : ''}>Expired</option></select></div>` : ''}
-      <div class="field">
+      <div class="field" data-card-field>
         <label for="card-color-picker">Card color</label>
         <div class="card-color-controls">
           <input id="card-color-picker" type="color" value="${escapeHtml(initialColor)}" aria-label="Choose a custom card color" />
@@ -527,14 +565,27 @@ function openCardModal(existingCard = null) {
   const colorPicker = sheet.querySelector('#card-color-picker');
   const holderInput = sheet.querySelector('[name="holder_name"]');
   const numberInput = sheet.querySelector('[name="number"]');
+  const kindInput = sheet.querySelector('[name="kind"]');
+  const setKindFields = (kind) => {
+    sheet.querySelectorAll('[data-card-field]').forEach((field) => { field.hidden = kind !== 'card'; });
+    sheet.querySelectorAll('[data-account-field]').forEach((field) => { field.hidden = kind !== 'account'; });
+    if (numberInput) numberInput.required = kind === 'card' && !editing;
+    sheet.querySelectorAll('[data-card-field] input[name="exp_month"], [data-card-field] input[name="exp_year"]').forEach((input) => { input.required = kind === 'card' && !editing; });
+  };
+  setKindFields(initialKind);
+  if (kindInput) kindInput.addEventListener('change', () => setKindFields(kindInput.value));
   const balanceInput = sheet.querySelector('[name="balance"]');
   const preview = sheet.querySelector('.card-preview');
   const updatePreview = () => {
-    preview.innerHTML = `<span>${escapeHtml(existingCard?.card_type || 'Physical Card')}</span><strong>${editing ? money(Number(balanceInput.value) || 0) : 'Available balance'}</strong><span>•••• &nbsp; •••• &nbsp; •••• &nbsp; ${escapeHtml(numberInput.value.replace(/\D/g, '').slice(-4) || '0000')}</span>`;
+    const enteredDigits = String(numberInput?.value || '').replace(/\D/g, '');
+    const shownNumber = enteredDigits && state.storeFullCardNumbers
+      ? escapeHtml((enteredDigits.match(/.{1,4}/g) || []).join(' '))
+      : `<span aria-hidden="true">•••• &nbsp; •••• &nbsp; •••• &nbsp;</span>${escapeHtml(enteredDigits.slice(-4) || existingCard?.last4 || '0000')}`;
+    preview.innerHTML = `<span>${escapeHtml(existingCard?.card_type || 'Physical Card')}</span><strong>${editing ? money(Number(balanceInput.value) || 0, existingCard.currency || state.displayCurrency) : 'Available balance'}</strong><span>${shownNumber}</span>`;
     preview.style.cssText = cardColorTokens(cardColor);
     preview.style.color = getCardTextColor(cardColor);
   };
-  [holderInput, numberInput, balanceInput].forEach((input) => input.addEventListener('input', updatePreview));
+  [holderInput, numberInput, balanceInput].filter(Boolean).forEach((input) => input.addEventListener('input', updatePreview));
   updatePreview();
   const updateCardColor = (color) => {
     cardColor = color;
@@ -554,23 +605,42 @@ function openCardModal(existingCard = null) {
     const err = sheet.querySelector('#card-error');
     err.textContent = '';
     try {
+      const kind = editing ? existingCard.kind || 'card' : f.get('kind');
       const body = {
+        kind,
         holder_name: f.get('holder_name'),
-        exp_month: f.get('exp_month'),
-        exp_year: f.get('exp_year'),
         balance: Number(f.get('balance')) || 0,
         card_color: cardColor,
-        brand: f.get('brand'),
       };
+      if (kind === 'account') {
+        Object.assign(body, { account_kind: f.get('account_kind'), provider: f.get('provider'), account_number: f.get('account_number'), currency: String(f.get('currency') || 'NPR').toUpperCase() });
+      } else {
+        Object.assign(body, { exp_month: f.get('exp_month'), exp_year: f.get('exp_year'), brand: f.get('brand'), currency: state.displayCurrency });
+      }
       let card;
       if (editing) {
-        body.last4 = String(f.get('number')).replace(/\D/g, '').slice(-4);
         body.status = f.get('status');
+        if (kind === 'card') {
+          const rawNumber = String(f.get('number') || '');
+          const enteredNumber = rawNumber.replace(/\D/g, '');
+          if (rawNumber && !/^[0-9 -]+$/.test(rawNumber)) throw new Error('Card number may contain only digits, spaces, or dashes.');
+          if (rawNumber && (enteredNumber.length < 12 || enteredNumber.length > 19)) throw new Error('Enter the complete card number (12-19 digits), or leave it blank to keep the current one.');
+          if (rawNumber && !state.storeFullCardNumbers) throw new Error('Full-number storage is off. Only the last four digits are saved; enable full-number storage in Profile to save the complete number.');
+          body.last4 = enteredNumber ? enteredNumber.slice(-4) : existingCard.last4;
+          if (enteredNumber) body.full_number = enteredNumber;
+        }
         ({ card } = await api(`/api/cards/${existingCard.id}`, { method: 'PUT', body }));
       } else {
-        body.number = String(f.get('number')).replace(/[\s-]/g, '');
+        if (kind === 'card') {
+          const rawNumber = String(f.get('number') || '');
+          const digits = rawNumber.replace(/\D/g, '');
+          if (!/^[0-9 -]+$/.test(rawNumber) || digits.length < 12 || digits.length > 19) throw new Error('Enter a complete card number with 12-19 digits.');
+          body.number = digits;
+        }
         ({ card } = await api('/api/cards', { method: 'POST', body }));
       }
+      state.revealedCardId = null;
+      state.revealedCardNumber = null;
       if (!editing) state.activeCardId = card.id;
       state.cardOrder = state.cardOrder.filter((id) => id !== card.id);
       if (!editing) state.cardOrder.unshift(card.id);
@@ -591,7 +661,7 @@ function transactionModal(type = 'expense') {
     return addCardModal();
   }
   const cardOpts = state.cards
-    .map((c) => `<option value="${c.id}" ${c.id === state.activeCardId ? 'selected' : ''}>${brandLabel(c.brand)} •••• ${c.last4}</option>`)
+    .map((c) => `<option value="${c.id}" ${c.id === state.activeCardId ? 'selected' : ''}>${c.kind === 'account' ? `${escapeHtml(c.provider || 'Account')} (${c.account_kind === 'mobile_wallet' ? 'wallet' : 'bank'})` : `${brandLabel(c.brand)} •••• ${c.last4}`}</option>`)
     .join('');
   const catOpts = state.categories
     .filter((c) => (type === 'income' ? c === 'Income' : c !== 'Income'))
@@ -610,7 +680,7 @@ function transactionModal(type = 'expense') {
         <div class="field"><label>Date & time</label><input name="spent_at" type="datetime-local" value="${local}" /></div>
       </div>
       <div class="field"><label>Category</label><select name="category">${catOpts}</select></div>
-      <div class="field"><label>Card</label><select name="card_id">${cardOpts}</select></div>
+      <div class="field"><label>Pay from</label><select name="card_id">${cardOpts}</select></div>
       <div class="form-error" id="tx-error"></div>
       <button class="submit-btn ${type === 'income' ? 'violet' : ''}" type="submit">
         ${type === 'income' ? 'Add Income' : 'Save Expense'}
@@ -650,7 +720,7 @@ function topUpModal(cardId) {
   if (!state.cards.length) return addCardModal();
   const id = cardId || state.activeCardId;
   const opts = state.cards
-    .map((c) => `<option value="${c.id}" ${c.id === id ? 'selected' : ''}>${brandLabel(c.brand)} •••• ${c.last4}</option>`)
+    .map((c) => `<option value="${c.id}" ${c.id === id ? 'selected' : ''}>${c.kind === 'account' ? `${escapeHtml(c.provider || 'Account')} (${c.account_kind === 'mobile_wallet' ? 'wallet' : 'bank'})` : `${brandLabel(c.brand)} •••• ${c.last4}`}</option>`)
     .join('');
   openSheet(`
     <h3>Top Up</h3>
@@ -704,7 +774,7 @@ function viewAllModal() {
   filters.innerHTML =
     `<button data-filter="all" class="on">All</button>` +
     state.cards
-      .map((c) => `<button data-filter="${c.id}">${brandLabel(c.brand)} •••• ${c.last4}</button>`)
+      .map((c) => `<button data-filter="${c.id}">${c.kind === 'account' ? escapeHtml(c.provider || 'Account') : brandLabel(c.brand)} •••• ${c.last4}</button>`)
       .join('');
 
   filters.addEventListener('click', (e) => {
@@ -765,20 +835,52 @@ document.querySelectorAll('.nav-item').forEach((n) =>
   n.addEventListener('click', () => showScreen(n.dataset.screen))
 );
 
-document.querySelectorAll('.qa').forEach((b) =>
-  b.addEventListener('click', () => {
-    const a = b.dataset.action;
-    if (a === 'topup') topUpModal();
-    else if (a === 'more') moreModal();
-    else if (a === 'request') transactionModal('income');
-    else transactionModal('expense');
-  })
-);
-
+$('#record-expense-btn').addEventListener('click', () => transactionModal('expense'));
+$('#record-income-btn').addEventListener('click', () => transactionModal('income'));
 $('#add-card-btn').addEventListener('click', addCardModal);
 $('#add-card-btn-2').addEventListener('click', addCardModal);
 $('#view-all-btn').addEventListener('click', viewAllModal);
 $('#bell-btn').addEventListener('click', () => toast('You are all caught up ✨'));
+
+$('#store-full-card-numbers').addEventListener('change', async (e) => {
+  const checkbox = e.target;
+  if (!checkbox.checked && !confirm('Turn off full-number storage? This permanently deletes every saved full card number. Only the last four digits will remain, and the full numbers cannot be recovered.')) {
+    checkbox.checked = true;
+    return;
+  }
+  try {
+    const { settings } = await api('/api/settings', { method: 'PUT', body: { store_full_card_numbers: checkbox.checked } });
+    state.storeFullCardNumbers = settings.store_full_card_numbers;
+    state.revealedCardId = null;
+    state.revealedCardNumber = null;
+    await refresh();
+    toast(checkbox.checked ? 'Full card-number storage enabled' : 'Saved full card numbers permanently deleted');
+  } catch (err) {
+    checkbox.checked = state.storeFullCardNumbers;
+    toast(err.message);
+  }
+});
+
+$('#display-currency').addEventListener('change', async (e) => {
+  const select = e.target;
+  const previous = state.displayCurrency;
+  if (!confirm(`Convert saved balances and transaction amounts from their current currencies to ${select.value} using the latest available daily reference rates? This changes the stored values.`)) {
+    select.value = previous;
+    return;
+  }
+  select.disabled = true;
+  try {
+    const { settings } = await api('/api/settings', { method: 'PUT', body: { display_currency: select.value } });
+    state.displayCurrency = settings.display_currency;
+    await refresh();
+    toast(`Converted balances and transactions to ${state.displayCurrency}`);
+  } catch (err) {
+    select.value = previous;
+    toast(err.message);
+  } finally {
+    select.disabled = false;
+  }
+});
 
 $('#reset-btn').addEventListener('click', async () => {
   if (!confirm('Wipe every card and transaction? This cannot be undone.')) return;
@@ -812,8 +914,7 @@ document.addEventListener('click', (e) => {
 
 document.body.addEventListener('click', async (e) => {
   const balanceToggle = e.target.closest('[data-toggle-balance]');
-  if (balanceToggle) {
-    toggleCardBalance();
+  if (balanceToggle) {          await toggleCardBalance(balanceToggle.dataset.toggleBalance);
     return;
   }
 
@@ -891,6 +992,8 @@ document.body.addEventListener('click', async (e) => {
     const meta = await api('/api/meta');
     state.categories = meta.categories;
     state.themes = meta.themes;
+    state.storeFullCardNumbers = meta.settings?.store_full_card_numbers === true;
+    state.displayCurrency = meta.settings?.display_currency || 'USD';
     await refresh();
     showScreen(location.hash.slice(1) || 'home');
   } catch (err) {

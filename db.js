@@ -23,7 +23,17 @@ db.exec(`
     card_type   TEXT    NOT NULL DEFAULT 'Physical Card',
     currency    TEXT    NOT NULL DEFAULT 'USD',
     status      TEXT    NOT NULL DEFAULT 'active',
+    kind        TEXT    NOT NULL DEFAULT 'card',
+    account_kind TEXT,
+    provider    TEXT,
+    account_number TEXT,
+    full_number TEXT,
     created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS app_settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
   );
 
   CREATE TABLE IF NOT EXISTS transactions (
@@ -53,6 +63,35 @@ if (!cardColumns.includes('currency')) {
 }
 if (!cardColumns.includes('status')) {
   db.exec("ALTER TABLE cards ADD COLUMN status TEXT NOT NULL DEFAULT 'active'");
+}
+if (!cardColumns.includes('kind')) {
+  db.exec("ALTER TABLE cards ADD COLUMN kind TEXT NOT NULL DEFAULT 'card'");
+}
+if (!cardColumns.includes('account_kind')) {
+  db.exec('ALTER TABLE cards ADD COLUMN account_kind TEXT');
+}
+if (!cardColumns.includes('provider')) {
+  db.exec('ALTER TABLE cards ADD COLUMN provider TEXT');
+}
+if (!cardColumns.includes('account_number')) {
+  db.exec('ALTER TABLE cards ADD COLUMN account_number TEXT');
+}
+if (!cardColumns.includes('full_number')) {
+  db.exec('ALTER TABLE cards ADD COLUMN full_number TEXT');
+}
+db.prepare("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('store_full_card_numbers', 'false')").run();
+db.prepare("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('display_currency', 'NPR')").run();
+if (!db.prepare("SELECT 1 FROM app_settings WHERE key = 'card_number_storage_default_v2'").get()) {
+  db.exec('BEGIN');
+  try {
+    db.prepare('UPDATE cards SET full_number = NULL').run();
+    db.prepare("UPDATE app_settings SET value = 'false' WHERE key = 'store_full_card_numbers'").run();
+    db.prepare("INSERT INTO app_settings (key, value) VALUES ('card_number_storage_default_v2', 'done')").run();
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
 }
 
 function transaction(fn) {
