@@ -17,9 +17,9 @@ const money = (n) =>
 /* ------------------------------------------------------------- theme maps */
 
 const CARD_THEMES = {
-  violet: 'linear-gradient(135deg, #6c4cf5 0%, #8b6bff 100%)',
-  teal: 'linear-gradient(135deg, #0f766e 0%, #14b8a6 100%)',
-  amber: 'linear-gradient(135deg, #9a3412 0%, #d97706 55%, #b45309 100%)',
+  violet: 'linear-gradient(135deg, #6C5CE7 0%, #8B7CF6 100%)',
+  teal: 'linear-gradient(90deg, #0E8F83 0%, #14B8A6 100%)',
+  amber: 'linear-gradient(90deg, #B45309 0%, #F59E0B 100%)',
   rose: 'linear-gradient(135deg, #be123c 0%, #fb7185 100%)',
   slate: 'linear-gradient(135deg, #1f2937 0%, #4b5563 100%)',
   ocean: 'linear-gradient(135deg, #1e3a8a 0%, #38bdf8 100%)',
@@ -56,10 +56,11 @@ function brandMark(brand, light) {
 function fmtDate(sql) {
   const d = new Date(sql.replace(' ', 'T'));
   if (Number.isNaN(d.getTime())) return sql;
-  const today = new Date();
-  const sameDay = d.toDateString() === today.toDateString();
-  if (sameDay) return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-  return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
+  const time = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }).toLowerCase();
+  const day = d.getDate();
+  const month = d.toLocaleDateString('en-US', { month: 'long' });
+  const year = d.getFullYear();
+  return `${time} ${day} ${month}, ${year}`;
 }
 
 /* -------------------------------------------------------------------- api */
@@ -152,9 +153,9 @@ function txRow(t, withDelete) {
     <div class="tx-ico">${icon(t.category)}</div>
     <div class="tx-main">
       <div class="tx-title">${escapeHtml(t.title)}</div>
-      <div class="tx-meta">${escapeHtml(t.category)} · ${fmtDate(t.spent_at)}</div>
+      <div class="tx-meta">${fmtDate(t.spent_at)}</div>
     </div>
-    <div class="tx-amt ${t.type === 'income' ? 'income' : ''}">${t.type === 'income' ? '+' : '-'}${money(t.amount)}</div>
+    <div class="tx-amt ${t.type === 'income' ? 'income' : ''}">${money(t.amount)}</div>
     ${
       withDelete
         ? `<button class="tx-del" data-del="${t.id}" aria-label="Delete">

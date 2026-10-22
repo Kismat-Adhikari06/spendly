@@ -79,9 +79,11 @@ if (!hasCards) {
 
   const seedTx = [
     // [cardIndex, title, category, amount, type, daysAgo, hour]
+    // The first four rows match the reference design exactly.
     [2, 'House Rent', 'Housing', 300.0, 'expense', 0, 10],
     [2, 'Internet Bill', 'Utilities', 85.0, 'expense', 0, 12],
     [1, 'Groceries', 'Groceries', 240.0, 'expense', 1, 9],
+    [2, 'Shopping', 'Shopping', 79.99, 'expense', 1, 16],
     [2, 'Electricity', 'Utilities', 132.5, 'expense', 2, 17],
     [0, 'Coffee & Bakery', 'Dining', 24.75, 'expense', 2, 8],
     [1, 'Fuel - Shell', 'Transport', 62.4, 'expense', 3, 18],
@@ -107,9 +109,19 @@ if (!hasCards) {
 
   const seedAll = transaction(() => {
     const ids = seedCards.map((c) => insertCard.run(...c).lastInsertRowid);
-    for (const [ci, title, category, amount, type, days, hour] of seedTx) {
-      insertTx.run(ids[ci], title, category, amount, type, at(days, hour));
-    }
+    // Rows pinned to the exact reference timestamps, everything else is relative demo history.
+    // Keyed by seedTx index (not title) so shared titles like Groceries are not wrongly pinned.
+    const pinned = new Map([
+      [0, '2026-10-21 10:00:00'],
+      [1, '2026-10-21 12:00:00'],
+      [2, '2026-10-20 09:30:00'],
+      [3, '2026-10-20 17:20:00'],
+      [4, '2026-10-19 18:40:00'],
+    ]);
+    seedTx.forEach((row, i) => {
+      const [ci, title, category, amount, type, days, hour] = row;
+      insertTx.run(ids[ci], title, category, amount, type, pinned.get(i) || at(days, hour));
+    });
   });
   seedAll();
 }
