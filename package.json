@@ -1,0 +1,14 @@
+{
+  "name": "expense-management",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Lightweight expense management system with multi-card support",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
