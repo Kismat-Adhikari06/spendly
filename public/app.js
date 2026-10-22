@@ -126,14 +126,7 @@ function fmtDate(sql) {
 /* -------------------------------------------------------------------- api */
 
 async function api(path, options = {}) {
-  const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-    body: options.body ? JSON.stringify(options.body) : undefined,
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || 'Request failed');
-  return data;
+  return window.spendlyLocalStore.api(path, options);
 }
 
 async function refresh() {
@@ -395,12 +388,18 @@ function renderStats() {
 
   // bars
   const bars = $('#bars');
-  const max = Math.max(...o.monthly.map((m) => m.spend), 1);
-  bars.innerHTML = o.monthly.length
-    ? o.monthly
+  const monthRows = [];
+  for (let offset = 5; offset >= 0; offset -= 1) {
+    const monthDate = new Date(new Date().getFullYear(), new Date().getMonth() - offset, 1);
+    const monthKey = `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, '0')}`;
+    monthRows.push(o.monthly.find((entry) => entry.month === monthKey) || { month: monthKey, spend: 0, income: 0 });
+  }
+  const max = Math.max(...monthRows.map((m) => m.spend), 1);
+  bars.innerHTML = monthRows.length
+    ? monthRows
         .map((m) => {
           const h = Math.max(6, Math.round((m.spend / max) * 120));
-          const label = new Date(m.month + '-02').toLocaleDateString('en-US', { month: 'short' });
+          const label = new Date(`${m.month}-02T00:00:00`).toLocaleDateString('en-US', { month: 'short' });
           return `<div class="bar-col">
             <span class="bar-val">${Math.round(m.spend / 100) / 10}k</span>
             <div class="bar ${m.spend === 0 ? 'dim' : ''}" style="height:${h}px"></div>
@@ -908,11 +907,57 @@ $('#display-currency').addEventListener('change', async (e) => {
   }
 });
 
+$('#export-backup-btn').addEventListener('click', async () => {
+  try {
+    const backup = await window.spendlyLocalStore.exportBackup();
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `spendly-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast('Backup downloaded to your device');
+  } catch (err) {
+    toast(err.message);
+  }
+});
+
+const backupFile = $('#backup-file');
+$('#import-backup-btn').addEventListener('click', () => backupFile.click());
+backupFile.addEventListener('change', async () => {
+  const file = backupFile.files[0];
+  if (!file) return;
+  try {
+    if (file.size > 10 * 1024 * 1024) throw new Error('Backup file must be smaller than 10 MB.');
+    const backup = JSON.parse(await file.text());
+    if (!confirm('Restore this backup? It will replace all cards, transactions, and preferences currently saved in this browser.')) return;
+    await window.spendlyLocalStore.importBackup(backup);
+    const { settings } = await api('/api/meta');
+    state.storeFullCardNumbers = settings.store_full_card_numbers === true;
+    state.displayCurrency = settings.display_currency || 'NPR';
+    $('#store-full-card-numbers').checked = state.storeFullCardNumbers;
+    $('#display-currency').value = state.displayCurrency;
+    state.revealedCardId = null;
+    state.revealedCardNumber = null;
+    await refresh();
+    toast('Backup restored on this device');
+  } catch (err) {
+    toast(err.message || 'Could not restore backup');
+  } finally {
+    backupFile.value = '';
+  }
+});
+
 $('#reset-btn').addEventListener('click', async () => {
-  if (!confirm('Wipe every card and transaction? This cannot be undone.')) return;
-  for (const c of state.cards) await api(`/api/cards/${c.id}`, { method: 'DELETE' });
+  if (!confirm('Wipe every card and transaction on this device? This cannot be undone.')) return;
+  await window.spendlyLocalStore.clearAll();
+  state.storeFullCardNumbers = false;
+  state.displayCurrency = 'NPR';
+  state.revealedCardId = null;
+  state.revealedCardNumber = null;
   await refresh();
-  toast('All data wiped');
+  toast('All local data wiped');
 });
 
 let deckTouchStartX = null;
@@ -1003,7 +1048,7 @@ document.body.addEventListener('click', async (e) => {
   const delCard = e.target.closest('[data-del-card]');
   if (delCard) {
     const id = Number(delCard.dataset.delCard);
-    if (confirm('Delete this card and its transactions?')) {
+    if (confirm('Delete this card and its transactions from this device?')) {
       await api(`/api/cards/${id}`, { method: 'DELETE' });
       await refresh();
       toast('Card deleted');
@@ -1015,6 +1060,8 @@ document.body.addEventListener('click', async (e) => {
 
 (async function init() {
   try {
+    if (!('indexedDB' in window)) throw new Error('This browser does not support local storage required by Spendly.');
+    await window.spendlyLocalStore.open();
     const meta = await api('/api/meta');
     state.categories = meta.categories;
     state.themes = meta.themes;

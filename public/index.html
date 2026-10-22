@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#6c4cf5" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/icons/icon-192.svg" type="image/svg+xml" />
   <title>Spendly — Expense Manager</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -131,25 +134,29 @@
       <div class="panel">
         <div class="panel-head"><h2>Preferences</h2></div>
         <div class="setting-row">
-          <div class="setting-copy"><strong>Store full card numbers</strong><span>Off means saved cards keep only the last four digits.</span></div>
+          <div class="setting-copy"><strong>Store full card numbers</strong><span>Saved in this browser only; off keeps the last four digits.</span></div>
           <label class="switch"><input id="store-full-card-numbers" type="checkbox" checked aria-describedby="card-number-warning"><span class="switch-track" aria-hidden="true"></span></label>
         </div>
         <p class="setting-warning" id="card-number-warning">Full card numbers are sensitive. Turning this off permanently deletes any saved full card numbers; the app cannot restore them.</p>
         <div class="field profile-currency-field">
           <label for="display-currency">Display currency</label>
           <select id="display-currency"><option value="NPR">NPR — Nepalese rupee</option><option value="USD">USD — US dollar</option><option value="INR">INR — Indian rupee</option><option value="EUR">EUR — Euro</option><option value="GBP">GBP — British pound</option><option value="CAD">CAD — Canadian dollar</option><option value="AUD">AUD — Australian dollar</option><option value="JPY">JPY — Japanese yen</option></select>
-          <span class="field-hint">Changing currency converts saved balances and transactions using daily exchange rates.</span>
+          <span class="field-hint">Changing currency converts balances for all cards and bank/mobile accounts, plus all saved transaction amounts, using a daily reference rate. Converted values are saved; changing back later may not restore the original amounts exactly.</span>
         </div>
       </div>
 
       <div class="panel">
         <div class="panel-head"><h2>Data</h2></div>
+        <button class="row-btn" id="export-backup-btn" type="button">Download backup</button>
+        <button class="row-btn" id="import-backup-btn" type="button">Restore from backup</button>
+        <input id="backup-file" type="file" accept="application/json,.json" hidden>
+        <p class="field-hint">Backups stay on this device unless you choose where to save or share the downloaded file. They may contain full card numbers if that option is enabled.</p>
         <button class="row-btn danger" id="reset-btn">
           <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
           Wipe all data
         </button>
       </div>
-      <p class="foot-note">If enabled, full card numbers are saved locally in the app database. This is sensitive data; never enter a PIN, CVV, or banking password.</p>
+      <p class="foot-note">Your records stay in this browser on this device. Clearing site data can erase them; there is no account or automatic sync. If enabled, full card numbers are saved locally and are sensitive. Never enter a PIN, CVV, or banking password.</p>
     </section>
 
     <!-- ===================== NAV ===================== -->
@@ -181,6 +188,8 @@
 
   <div class="toast" id="toast" hidden></div>
 
+  <script src="local-store.js"></script>
   <script src="app.js"></script>
+  <script src="pwa.js"></script>
 </body>
 </html>

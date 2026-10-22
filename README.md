@@ -1,21 +1,27 @@
 # Spendly — Expense Management System
 
-A lightweight expense tracker with multi-card management. Node + Express + SQLite, no build step, no MongoDB.
+A lightweight, installable expense tracker with multi-card management. The app is served as static files; each browser stores its own records in IndexedDB. No account or shared user database is used.
 
 ## Run
 
 ```bash
 npm install
-npm start          # http://localhost:3000
+npm start          # http://localhost:3000 (static hosting + legacy API routes unused by PWA UI)
 ```
 
-The SQLite database (`app.db`) is created and seeded with demo cards and transactions on first run. Delete `app.db` to reset.
+## Local data and privacy
+
+Card/account records, transactions, and preferences are stored in IndexedDB on the current browser and device. The frontend does not send this data to the Express/SQLite server. Each browser starts with an empty local database; existing server-side SQLite data is not automatically imported. There is no account or automatic cross-device sync. Clearing browser/site data may permanently remove local records. Full card number storage is an opt-in local preference and remains sensitive data.
+
+The existing SQLite backend and its database file remain in the repository for now, but the PWA frontend does not use them for user records.
+
+The app shell is cached by its service worker for offline loading. External Google Fonts and profile images may be unavailable offline, and installing from the web normally requires HTTPS (localhost is allowed for development). Currency conversion still requests public daily exchange rates from Frankfurter when changing currencies; other user data remains local.
 
 ## Stack
 
-- **Database:** SQLite via Node's built-in `node:sqlite` (zero native dependencies, WAL mode)
-- **Backend:** Express 4 — one small route file, no ORM
-- **Frontend:** Vanilla HTML/CSS/JS single-page app, no framework or bundler
+- **Local data:** Browser IndexedDB, stored separately per browser/device
+- **Static hosting:** Express 4 serves the app files; no frontend framework or build tool
+- **Legacy backend:** SQLite via Node's built-in `node:sqlite` remains available in this repository, but is not used by the PWA frontend
 
 ## Features
 
@@ -28,37 +34,25 @@ The SQLite database (`app.db`) is created and seeded with demo cards and transac
 
 ## Security
 
-- Only the **last 4 digits** of a card number are ever persisted — the full number is validated then discarded server-side
-- No PINs, CVVs or auth secrets are stored or logged
-- All input is validated server-side (card number length, expiry, positive amounts, known categories)
-- Card deletion cascades to its transactions
-- Amounts are handled as numbers and only accepted when positive
-
-## API
-
-| Method | Route | Purpose |
-| --- | --- | --- |
-| GET | `/api/overview` | Balance, month spend/income, category breakdown, monthly trend, recent tx |
-| GET | `/api/cards` | All cards (masked) |
-| POST | `/api/cards` | Add card — sends full number, only `last4` is stored |
-| DELETE | `/api/cards/:id` | Delete card + its transactions |
-| POST | `/api/cards/:id/topup` | Add funds, records an income transaction |
-| GET | `/api/transactions?card_id=&limit=` | Transaction history |
-| POST | `/api/transactions` | Record expense or income |
-| DELETE | `/api/transactions/:id` | Delete a transaction and reverse its balance effect |
-| GET | `/api/meta` | Categories and theme list |
+- User-entered records stay in the current browser's IndexedDB; the frontend does not send them to the server
+- Full card number storage is off by default; if enabled, full numbers are stored unencrypted in local browser storage
+- Never enter PINs, CVVs or banking passwords
+- Local storage is not a backup: clearing site data or losing the device may remove records
 
 ## Project structure
 
 ```
 .
-├── server.js          Express app, all API routes
-├── db.js              SQLite connection, schema, seed data
+├── server.js          Express static-file host and legacy API
+├── db.js              Legacy SQLite schema and seed data (unused by PWA frontend)
 ├── public/
 │   ├── index.html     App shell, screens, modals
 │   ├── styles.css     All styling
-│   └── app.js         Frontend logic, API calls, charts
-└── app.db             SQLite database (created on first run, git-ignored)
+│   ├── app.js         UI logic and charts
+│   ├── local-store.js IndexedDB data layer
+│   ├── sw.js          PWA offline app-shell cache
+│   └── manifest.webmanifest
+└── app.db             Legacy SQLite database, git-ignored
 ```
 
 ## Screens
@@ -68,6 +62,6 @@ Four tabs in the bottom nav:
 - **Home** — greeting, card stack, quick actions, recent expenses
 - **Cards** — every linked card with balance, top-up and delete
 - **Stats** — monthly spend trend and category breakdown
-- **Profile** — summary totals and data reset
+- **Profile** — summary totals, local preferences and data reset
 
-To reset the demo data, delete `app.db` and restart, or use **Wipe all data** on the Profile tab.
+Use **Wipe all data** on the Profile tab to clear this browser's local records. This does not delete or migrate records in the legacy server-side SQLite database.
