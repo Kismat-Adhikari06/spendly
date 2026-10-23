@@ -409,9 +409,9 @@ function txRow(t, withDelete) {
     <div class="tx-amt ${t.type === 'income' ? 'income' : ''}">${transactionMoney(t.amount)}</div>
     ${
       withDelete
-        ? `<button class="tx-del" data-del="${t.id}" aria-label="Delete">
+        ? `<div class="tx-actions"><button type="button" class="tx-edit" data-edit="${t.id}" aria-label="Edit ${escapeHtml(t.title)}">Edit</button><button type="button" class="tx-del" data-del="${t.id}" aria-label="Delete ${escapeHtml(t.title)}">
             <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>`
+          </button></div>`
         : ''
     }
   </div>`;
@@ -873,35 +873,36 @@ function openCardModal(existingCard = null) {
 }
 
 /* ---- add transaction ---- */
-function transactionModal(type = 'expense') {
+function transactionModal(type = 'expense', editing = null) {
   if (!state.cards.length) {
     toast('Add a card first');
     return addCardModal();
   }
+  const transactionType = editing ? editing.type : type;
   const cardOpts = state.cards
-    .map((c) => `<option value="${c.id}" ${c.id === state.activeCardId ? 'selected' : ''}>${c.kind === 'account' ? `${escapeHtml(c.provider || 'Account')} (${c.account_kind === 'mobile_wallet' ? 'wallet' : 'bank'})` : `${brandLabel(c.brand)} •••• ${c.last4}`}</option>`)
+    .map((c) => `<option value="${c.id}" ${(editing ? c.id === editing.card_id : c.id === state.activeCardId) ? 'selected' : ''}>${c.kind === 'account' ? `${escapeHtml(c.provider || 'Account')} (${c.account_kind === 'mobile_wallet' ? 'wallet' : 'bank'})` : `${brandLabel(c.brand)} •••• ${c.last4}`}</option>`)
     .join('');
   const catOpts = state.categories
-    .filter((c) => (type === 'income' ? c === 'Income' : c !== 'Income'))
-    .map((c) => `<option value="${c}">${c}</option>`)
+    .filter((c) => (transactionType === 'income' ? c === 'Income' : c !== 'Income'))
+    .map((c) => `<option value="${c}" ${editing && c === editing.category ? 'selected' : ''}>${c}</option>`)
     .join('');
   const today = new Date();
   const local = new Date(today.getTime() - today.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 
   openSheet(`
-    <h3>${type === 'income' ? 'Request / Income' : type === 'send' ? 'Send Money' : 'Add Expense'}</h3>
-    <p class="hint">${type === 'income' ? 'Record money coming in.' : 'Log a payment made from one of your cards.'}</p>
+    <h3>${editing ? 'Edit Transaction' : transactionType === 'income' ? 'Request / Income' : type === 'send' ? 'Send Money' : 'Add Expense'}</h3>
+    <p class="hint">${editing ? 'Correct the details for this transaction.' : transactionType === 'income' ? 'Record money coming in.' : 'Log a payment made from one of your cards.'}</p>
     <form id="tx-form">
-      <div class="field"><label>Title</label><input name="title" placeholder="e.g. Groceries" required maxlength="60" /></div>
+      <div class="field"><label>Title</label><input name="title" placeholder="e.g. Groceries" value="${editing ? escapeHtml(editing.title) : ''}" required maxlength="60" /></div>
       <div class="field-row">
-        <div class="field"><label>Amount</label><input name="amount" inputmode="decimal" placeholder="0.00" required /></div>
-        <div class="field"><label>Date & time</label><input name="spent_at" type="datetime-local" value="${local}" /></div>
+        <div class="field"><label>Amount</label><input name="amount" inputmode="decimal" placeholder="0.00" value="${editing ? editing.amount : ''}" required /></div>
+        <div class="field"><label>Date & time</label><input name="spent_at" type="datetime-local" value="${editing ? escapeHtml(editing.spent_at.replace(' ', 'T').slice(0, 16)) : local}" /></div>
       </div>
       <div class="field"><label>Category</label><select name="category">${catOpts}</select></div>
       <div class="field"><label>Pay from</label><select name="card_id">${cardOpts}</select></div>
       <div class="form-error" id="tx-error"></div>
       <button class="submit-btn ${type === 'income' ? 'violet' : ''}" type="submit">
-        ${type === 'income' ? 'Add Income' : 'Save Expense'}
+        ${editing ? 'Save Changes' : transactionType === 'income' ? 'Add Income' : 'Save Expense'}
       </button>
       <button class="submit-btn ghost" type="button" data-close>Cancel</button>
     </form>`);
@@ -911,10 +912,10 @@ function transactionModal(type = 'expense') {
     const f = new FormData(e.target);
     const err = sheet.querySelector('#tx-error');
     err.textContent = '';
-    const kind = type === 'income' ? 'income' : 'expense';
+    const kind = transactionType === 'income' ? 'income' : 'expense';
     try {
-      await api('/api/transactions', {
-        method: 'POST',
+      await api(editing ? `/api/transactions/${editing.id}` : '/api/transactions', {
+        method: editing ? 'PUT' : 'POST',
         body: {
           card_id: Number(f.get('card_id')),
           title: f.get('title'),
@@ -926,7 +927,8 @@ function transactionModal(type = 'expense') {
       });
       closeSheet();
       await refresh();
-      toast(kind === 'income' ? 'Income recorded' : 'Expense saved');
+      toast(editing ? 'Transaction updated' : kind === 'income' ? 'Income recorded' : 'Expense saved');
+      if (editing) viewAllModal();
     } catch (err2) {
       err.textContent = err2.message;
     }
@@ -980,10 +982,12 @@ function viewAllModal() {
   const filters = sheet.querySelector('#filters');
   const listEl = sheet.querySelector('#all-tx');
   let active = 'all';
+  let visibleTransactions = [];
 
   const paint = async () => {
     const url = active === 'all' ? '/api/transactions?limit=200' : `/api/transactions?card_id=${active}&limit=200`;
     const { transactions } = await api(url);
+    visibleTransactions = transactions;
     listEl.innerHTML = transactions.length
       ? transactions.map((t) => txRow(t, true)).join('')
       : `<div class="empty">Nothing here yet.</div>`;
@@ -1004,8 +1008,15 @@ function viewAllModal() {
   });
 
   listEl.addEventListener('click', async (e) => {
+    const editButton = e.target.closest('[data-edit]');
+    if (editButton) {
+      const transaction = visibleTransactions.find((item) => item.id === Number(editButton.dataset.edit));
+      if (transaction) transactionModal(transaction.type, transaction);
+      return;
+    }
     const btn = e.target.closest('[data-del]');
     if (!btn) return;
+    if (!confirm('Delete this transaction? This will update the card or account balance.')) return;
     await api(`/api/transactions/${btn.dataset.del}`, { method: 'DELETE' });
     await refresh();
     paint();

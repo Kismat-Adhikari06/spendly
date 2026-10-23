@@ -261,6 +261,38 @@
     return { transaction: transactionWithCard(tx, card) };
   }
 
+  async function updateTransaction(id, body) {
+    const tx = await get('transactions', id);
+    if (!tx) fail('Transaction not found.');
+    const cardId = Number(body.card_id);
+    const nextCard = await get('cards', cardId);
+    if (!nextCard) fail('Select a card.');
+    if (!body.title || typeof body.title !== 'string' || !body.title.trim()) fail('Title is required.');
+    const nextAmount = amount(body.amount, 'Amount must be positive.');
+    const nextCategory = body.category;
+    if (!CATEGORIES.includes(nextCategory)) fail('Unknown category.');
+    const nextType = body.type === 'income' ? 'income' : 'expense';
+    const previousCard = tx.card_id === cardId ? nextCard : await get('cards', tx.card_id);
+    if (previousCard && previousCard.id !== nextCard.id) {
+      previousCard.balance += tx.type === 'income' ? -tx.amount : tx.amount;
+      await put('cards', previousCard);
+    }
+    nextCard.balance += (tx.card_id === cardId ? (tx.type === 'income' ? -tx.amount : tx.amount) : 0)
+      + (nextType === 'income' ? nextAmount : -nextAmount);
+    await put('cards', nextCard);
+    const updated = {
+      ...tx,
+      card_id: cardId,
+      title: body.title.trim().slice(0, 60),
+      category: nextCategory,
+      amount: nextAmount,
+      type: nextType,
+      spent_at: dateString(body.spent_at),
+    };
+    await put('transactions', updated);
+    return { transaction: transactionWithCard(updated, nextCard) };
+  }
+
   async function deleteTransaction(id) {
     const tx = await get('transactions', id);
     if (tx) {
@@ -387,6 +419,7 @@
       return { transactions: await transactionRows(cardId, limit) };
     }
     if (method === 'POST' && pathname === '/api/transactions') return createTransaction(body);
+    if (method === 'PUT' && (match = pathname.match(/^\/api\/transactions\/(\d+)$/))) return updateTransaction(Number(match[1]), body);
     if (method === 'DELETE' && (match = pathname.match(/^\/api\/transactions\/(\d+)$/))) return deleteTransaction(Number(match[1]));
     if (method === 'GET' && pathname === '/api/overview') return overview();
     if (method === 'PUT' && pathname === '/api/settings') {

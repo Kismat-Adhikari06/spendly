@@ -276,14 +276,18 @@ input, select { font-family: inherit; font-size: 15px; }
 .tx-meta { font-size: 13px; color: #8A8D96; margin-top: 3px; }
 .tx-amt { font-size: 16px; font-weight: 700; color: #111; white-space: nowrap; }
 .tx-amt.income { color: var(--green); }
+.tx-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.tx-edit {
+  min-height: 32px; padding: 0 9px; border-radius: 8px;
+  color: var(--ink-2); font-size: 12px; font-weight: 600;
+}
+.tx-edit:hover { background: #f1f1f4; color: var(--ink); }
 .tx-del {
-  width: 30px; height: 30px; border-radius: 50%;
+  width: 32px; height: 32px; border-radius: 50%;
   display: grid; place-items: center;
   color: var(--ink-3);
-  opacity: 0;
-  transition: opacity 0.15s ease, background 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease;
 }
-.tx:hover .tx-del { opacity: 1; }
 .tx-del:hover { background: #fdecec; color: var(--red); }
 .tx-del svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; }
 
