@@ -51,7 +51,7 @@ input, select { font-family: inherit; font-size: 15px; }
   .app {
     min-height: auto;
     border-radius: 44px;
-    box-shadow: 0 30px 80px rgba(20, 20, 40, 0.22);
+    box-shadow: 0 16px 40px rgba(20, 20, 40, 0.18);
     border: 1px solid rgba(255, 255, 255, 0.6);
     padding-top: 34px;
   }
@@ -307,12 +307,11 @@ input, select { font-family: inherit; font-size: 15px; }
 .cc-holder { font-size: 14px; font-weight: 700; }
 .cc-actions { display: flex; gap: 8px; }
 .chip-btn {
-  background: rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.24);
   color: #fff;
   border-radius: 999px;
   padding: 8px 14px;
   font-size: 12.5px; font-weight: 700;
-  backdrop-filter: blur(6px);
   transition: background 0.15s ease;
 }
 .chip-btn:hover { background: rgba(255,255,255,0.32); }
@@ -486,7 +485,7 @@ input, select { font-family: inherit; font-size: 15px; }
 .seg button {
   flex: 1; padding: 11px; border-radius: 14px;
   background: #f3f3f6; font-size: 13.5px; font-weight: 700; color: var(--ink-2);
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 .seg button.on { background: var(--dark); color: #fff; }
 
@@ -769,3 +768,6 @@ input, select { font-family: inherit; font-size: 15px; }
 .onboarding-skip { align-self: center; margin-top: 14px; min-height: 40px; padding: 8px 16px; color: #6b6b76; font-size: 14px; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
 .onboarding-close { position: absolute; top: 18px; right: 18px; width: 42px; height: 42px; display: grid; place-items: center; border-radius: 50%; color: #171a22; }
 .onboarding-close svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+
+html { scroll-behavior: auto; }
+.sheet, .backdrop { will-change: transform, opacity; }

@@ -922,7 +922,7 @@ function showScreen(name, { push = true } = {}) {
   document.querySelectorAll('.nav-item').forEach((n) =>
     n.classList.toggle('active', n.dataset.screen === name)
   );
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  window.scrollTo({ top: 0, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
 }
 
 document.querySelectorAll('.nav-item').forEach((n) =>
