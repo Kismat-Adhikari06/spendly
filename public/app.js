@@ -264,7 +264,7 @@ function cardFace(card, layer = 'front', expanded = false) {
     <div class="physical-card-details">
       <div class="card-holder"><span>${isAccount ? escapeHtml(card.provider || 'Account holder') : 'Card Holder'}</span><strong>${holder}</strong></div>
       <div class="card-expiry"><span>${isAccount ? 'Type' : 'Expires'}</span><strong>${isAccount ? escapeHtml(card.account_kind === 'mobile_wallet' ? 'Wallet' : 'Bank') : `${String(card.exp_month || 1).padStart(2, '0')}/${card.exp_year || '----'}`}</strong></div>
-      <div class="network-logo-wrap">${isAccount ? `<span class="account-mark">${escapeHtml(card.provider || 'ACCOUNT')}</span>` : networkLogo(card.brand)}</div>
+      <div class="network-logo-wrap">${isAccount ? (card.logo ? `<img class="account-logo" src="${card.logo}" alt="${escapeHtml(card.provider || 'Account')} logo">` : `<span class="account-mark">${escapeHtml(card.provider || 'ACCOUNT')}</span>`) : networkLogo(card.brand)}</div>
     </div>
     ${expanded ? `<div class="expanded-card-details" aria-label="Card details expanded">
       <div class="expanded-details-heading"><span>Card details</span><span role="status" aria-live="polite">Card details expanded</span></div>
@@ -567,6 +567,102 @@ function toast(msg) {
   toastTimer = setTimeout(() => (el.hidden = true), 2600);
 }
 
+/* --------------------------------------------------------- bank logos */
+
+const LOGO_MAX_SIZE = 256;
+const LOGO_BG_TOLERANCE = 48;
+const LOGO_BG_FEATHER = 110;
+
+function loadImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => { URL.revokeObjectURL(url); resolve(image); };
+    image.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not read this image.')); };
+    image.src = url;
+  });
+}
+
+// Downscales the image, makes the connected background (found by flood-filling
+// inward from the edges) transparent, then crops to the logo. White inside the
+// logo is kept because the fill cannot reach it.
+async function prepareLogo(file) {
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) throw new Error('Choose a PNG, JPG, or WebP image.');
+  if (file.size > 5_000_000) throw new Error('Choose an image smaller than 5 MB.');
+  const image = await loadImage(file);
+  const scale = Math.min(1, LOGO_MAX_SIZE / Math.max(image.naturalWidth, image.naturalHeight));
+  const width = Math.max(1, Math.round(image.naturalWidth * scale));
+  const height = Math.max(1, Math.round(image.naturalHeight * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(image, 0, 0, width, height);
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const px = imageData.data;
+
+  const corners = [0, width - 1, (height - 1) * width, height * width - 1].map((i) => i * 4);
+  const alreadyTransparent = corners.every((i) => px[i + 3] < 200);
+  if (!alreadyTransparent) {
+    const bg = [0, 1, 2].map((c) => Math.round(corners.reduce((sum, i) => sum + px[i + c], 0) / corners.length));
+    const distance = (i) => Math.hypot(px[i] - bg[0], px[i + 1] - bg[1], px[i + 2] - bg[2]);
+    const removed = new Uint8Array(width * height);
+    const stack = [];
+    const visit = (x, y) => {
+      const n = y * width + x;
+      if (removed[n] || distance(n * 4) > LOGO_BG_TOLERANCE) return;
+      removed[n] = 1;
+      stack.push(n);
+    };
+    for (let x = 0; x < width; x += 1) { visit(x, 0); visit(x, height - 1); }
+    for (let y = 0; y < height; y += 1) { visit(0, y); visit(width - 1, y); }
+    while (stack.length) {
+      const n = stack.pop();
+      const x = n % width;
+      const y = (n - x) / width;
+      if (x > 0) visit(x - 1, y);
+      if (x < width - 1) visit(x + 1, y);
+      if (y > 0) visit(x, y - 1);
+      if (y < height - 1) visit(x, y + 1);
+    }
+    let removedCount = 0;
+    const edge = [];
+    for (let n = 0; n < removed.length; n += 1) {
+      if (removed[n]) { removedCount += 1; continue; }
+      const x = n % width;
+      const y = (n - x) / width;
+      if ((x > 0 && removed[n - 1]) || (x < width - 1 && removed[n + 1]) || (y > 0 && removed[n - width]) || (y < height - 1 && removed[n + width])) edge.push(n);
+    }
+    if (removedCount > removed.length * 0.92) throw new Error('Could not isolate the logo. Try an image with a plain background.');
+    // Soften the cut so the logo edge is not jagged.
+    for (const n of edge) {
+      const d = distance(n * 4);
+      if (d < LOGO_BG_FEATHER) px[n * 4 + 3] = Math.round(255 * (d - LOGO_BG_TOLERANCE) / (LOGO_BG_FEATHER - LOGO_BG_TOLERANCE));
+    }
+    for (let n = 0; n < removed.length; n += 1) if (removed[n]) px[n * 4 + 3] = 0;
+    ctx.putImageData(imageData, 0, 0);
+  }
+
+  // Crop to the visible logo.
+  let minX = width, minY = height, maxX = -1, maxY = -1;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (px[(y * width + x) * 4 + 3] > 16) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < 0) throw new Error('This image looks empty.');
+  const out = document.createElement('canvas');
+  out.width = maxX - minX + 1;
+  out.height = maxY - minY + 1;
+  out.getContext('2d').drawImage(canvas, minX, minY, out.width, out.height, 0, 0, out.width, out.height);
+  return out.toDataURL('image/png');
+}
+
 /* ---- add and edit cards ---- */
 function addCardModal() {
   openCardModal();
@@ -602,6 +698,16 @@ function openCardModal(existingCard = null) {
       </div>
       <div class="field" data-account-field hidden><label>Account type</label><select name="account_kind"><option value="bank" ${existingCard?.account_kind === 'bank' ? 'selected' : ''}>Bank account</option><option value="mobile_wallet" ${existingCard?.account_kind === 'mobile_wallet' ? 'selected' : ''}>Mobile wallet (eSewa, etc.)</option></select></div>
       <div class="field" data-account-field hidden><label>Bank or wallet name</label><input name="provider" placeholder="e.g. Global IME Bank or eSewa" value="${escapeHtml(existingCard?.provider || '')}" maxlength="60" /></div>
+      <div class="field" data-account-field hidden>
+        <label>Bank logo (optional)</label>
+        <div class="logo-picker">
+          <span class="logo-preview" data-logo-preview></span>
+          <button type="button" class="logo-btn" data-logo-pick>Upload logo</button>
+          <button type="button" class="logo-btn ghost" data-logo-remove hidden>Remove</button>
+          <input type="file" accept="image/png,image/jpeg,image/webp" data-logo-input hidden />
+        </div>
+        <span class="field-hint">The background is removed automatically, so a logo on a plain background works best.</span>
+      </div>
       <div class="field" data-account-field hidden><label>Account / wallet number</label><input name="account_number" inputmode="text" placeholder="Your account number" value="${escapeHtml(existingCard?.account_number || '')}" maxlength="34" /></div>
       <div class="field" data-account-field hidden><label>Currency</label><input name="currency" value="${escapeHtml(existingCard?.currency || state.displayCurrency)}" maxlength="3" placeholder="${escapeHtml(state.displayCurrency)}" /></div>
       <div class="field" data-card-field>
@@ -680,6 +786,31 @@ function openCardModal(existingCard = null) {
   });
   colorPicker.addEventListener('input', () => updateCardColor(colorPicker.value));
 
+  let logo = existingCard?.logo || '';
+  const logoPreview = sheet.querySelector('[data-logo-preview]');
+  const logoInput = sheet.querySelector('[data-logo-input]');
+  const logoRemove = sheet.querySelector('[data-logo-remove]');
+  const renderLogoPicker = () => {
+    logoPreview.innerHTML = logo ? `<img src="${logo}" alt="Logo preview">` : '';
+    logoRemove.hidden = !logo;
+    sheet.querySelector('[data-logo-pick]').textContent = logo ? 'Change logo' : 'Upload logo';
+  };
+  renderLogoPicker();
+  sheet.querySelector('[data-logo-pick]').addEventListener('click', () => logoInput.click());
+  logoRemove.addEventListener('click', () => { logo = ''; logoInput.value = ''; renderLogoPicker(); });
+  logoInput.addEventListener('change', async () => {
+    const file = logoInput.files[0];
+    if (!file) return;
+    try {
+      logo = await prepareLogo(file);
+      renderLogoPicker();
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      logoInput.value = '';
+    }
+  });
+
   sheet.querySelector('#card-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
@@ -695,7 +826,7 @@ function openCardModal(existingCard = null) {
         card_color: cardColor,
       };
       if (kind === 'account') {
-        Object.assign(body, { account_kind: f.get('account_kind'), provider: f.get('provider'), account_number: f.get('account_number'), currency: String(f.get('currency') || 'NPR').toUpperCase() });
+        Object.assign(body, { account_kind: f.get('account_kind'), provider: f.get('provider'), account_number: f.get('account_number'), logo, currency: String(f.get('currency') || 'NPR').toUpperCase() });
       } else {
         Object.assign(body, { exp_month: f.get('exp_month'), exp_year: f.get('exp_year'), brand: f.get('brand'), currency: state.displayCurrency });
       }

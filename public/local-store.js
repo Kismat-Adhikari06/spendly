@@ -60,6 +60,9 @@
     return safeCard;
   }
 
+  const LOGO_PATTERN = /^data:image\/png;base64,[A-Za-z0-9+/]+=*$/;
+  const isValidLogo = (value) => typeof value === 'string' && value.length <= 400_000 && LOGO_PATTERN.test(value);
+
   function fail(message) {
     throw new Error(message);
   }
@@ -112,7 +115,7 @@
       holder_name: holder_name.trim().slice(0, 60), brand: 'visa', last4: '', exp_month: 1, exp_year: 2099,
       balance: startingBalance, theme: THEMES.includes(theme) ? theme : 'violet',
       card_color: typeof card_color === 'string' && /^#[0-9a-fA-F]{6}$/.test(card_color) ? card_color.toLowerCase() : '#252827',
-      card_type: 'Physical Card', currency, status: 'active', kind, account_kind: null, provider: null, account_number: null,
+      card_type: 'Physical Card', currency, status: 'active', kind, account_kind: null, provider: null, account_number: null, logo: null,
     };
 
     if (kind === 'account') {
@@ -126,6 +129,10 @@
       card.account_kind = account_kind;
       card.provider = provider.trim().slice(0, 60);
       card.account_number = accountDigits;
+      if (body.logo) {
+        if (!isValidLogo(body.logo)) fail('Choose a valid logo image.');
+        card.logo = body.logo;
+      }
     } else {
       const storeFull = await setting('store_full_card_numbers', false);
       const rawNumber = String(number || '').trim();
@@ -195,6 +202,10 @@
       const nextCurrency = body.currency || card.currency;
       if (!/^[A-Z]{3}$/.test(String(nextCurrency))) fail('Currency must be a 3-letter code.');
       Object.assign(updated, { account_kind: body.account_kind, provider: body.provider.trim().slice(0, 60), account_number: digits, last4: digits.slice(-4), currency: nextCurrency, card_type: body.account_kind === 'bank' ? 'Bank Account' : 'Mobile Wallet' });
+      if (body.logo !== undefined) {
+        if (body.logo && !isValidLogo(body.logo)) fail('Choose a valid logo image.');
+        updated.logo = body.logo || null;
+      }
     } else {
       const month = Number(body.exp_month);
       const yearInput = Number(body.exp_year);
@@ -458,6 +469,7 @@
           || typeof card.last4 !== 'string' || !/^[A-Z]{3}$/.test(String(card.currency || 'USD'))) {
           fail('The backup contains invalid card data.');
         }
+        if (card.logo !== undefined && card.logo !== null && !isValidLogo(card.logo)) fail('The backup contains an invalid logo.');
         cardIds.add(card.id);
       }
       const storeFullNumbers = backup.settings.find((item) => item?.key === 'store_full_card_numbers')?.value === true;
