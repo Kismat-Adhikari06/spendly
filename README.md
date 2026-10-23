@@ -6,14 +6,13 @@ A lightweight, installable expense tracker with multi-card management. The app i
 
 ```bash
 npm install
-npm start          # http://localhost:3000 (static hosting + legacy API routes unused by PWA UI)
+npm start          # http://localhost:3000 (static hosting only)
 ```
 
 ## Local data and privacy
 
-Card/account records, transactions, and preferences are stored in IndexedDB on the current browser and device. The frontend does not send this data to the Express/SQLite server. Each browser starts with an empty local database; existing server-side SQLite data is not automatically imported. There is no account or automatic cross-device sync. Clearing browser/site data may permanently remove local records. Full card number storage is an opt-in local preference and remains sensitive data.
+Card/account records, transactions, and preferences are stored in IndexedDB on the current browser and device. The server only hosts static files and never receives this data. Each browser starts with an empty local database. There is no account or automatic cross-device sync. Clearing browser/site data may permanently remove local records. Full card number storage is an opt-in local preference and remains sensitive data.
 
-The existing SQLite backend and its database file remain in the repository for now, but the PWA frontend does not use them for user records.
 
 The app shell is cached by its service worker for offline loading. External Google Fonts and profile images may be unavailable offline, and installing from the web normally requires HTTPS (localhost is allowed for development). Currency conversion still requests public daily exchange rates from Frankfurter when changing currencies; other user data remains local.
 
@@ -21,7 +20,6 @@ The app shell is cached by its service worker for offline loading. External Goog
 
 - **Local data:** Browser IndexedDB, stored separately per browser/device
 - **Static hosting:** Express 4 serves the app files; no frontend framework or build tool
-- **Legacy backend:** SQLite via Node's built-in `node:sqlite` remains available in this repository, but is not used by the PWA frontend
 
 ## Features
 
@@ -35,7 +33,7 @@ The app shell is cached by its service worker for offline loading. External Goog
 ## Security
 
 - User-entered records stay in the current browser's IndexedDB; the frontend does not send them to the server
-- Full card number storage is off by default; if enabled, full numbers are stored unencrypted in local browser storage
+- Full card number storage is off by default. Card entry always requires a complete 12–19 digit card number; when storage is off, only its last four digits are retained in local browser storage. Enabling storage keeps the complete number locally, unencrypted, so it can be revealed on-device.
 - Never enter PINs, CVVs or banking passwords
 - Local storage is not a backup: clearing site data or losing the device may remove records
 
@@ -43,8 +41,7 @@ The app shell is cached by its service worker for offline loading. External Goog
 
 ```
 .
-├── server.js          Express static-file host and legacy API
-├── db.js              Legacy SQLite schema and seed data (unused by PWA frontend)
+├── server.js          Express static-file host (no API, no database)
 ├── public/
 │   ├── index.html     App shell, screens, modals
 │   ├── styles.css     All styling
@@ -52,7 +49,6 @@ The app shell is cached by its service worker for offline loading. External Goog
 │   ├── local-store.js IndexedDB data layer
 │   ├── sw.js          PWA offline app-shell cache
 │   └── manifest.webmanifest
-└── app.db             Legacy SQLite database, git-ignored
 ```
 
 ## Screens
@@ -64,4 +60,4 @@ Four tabs in the bottom nav:
 - **Stats** — monthly spend trend and category breakdown
 - **Profile** — summary totals, local preferences and data reset
 
-Use **Wipe all data** on the Profile tab to clear this browser's local records. This does not delete or migrate records in the legacy server-side SQLite database.
+Use **Wipe all data** on the Profile tab to clear this browser's local records.
