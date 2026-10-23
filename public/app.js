@@ -903,7 +903,7 @@ function moreModal() {
 
 /* ------------------------------------------------------------------- nav */
 
-const SCREENS = ['home', 'cards', 'stats', 'profile'];
+const SCREENS = ['home', 'cards', 'stats', 'profile', 'notifications'];
 
 // Current screen from the URL path (/cards), with legacy #cards links still honoured.
 function screenFromLocation() {
@@ -1090,7 +1090,8 @@ $('#record-income-btn').addEventListener('click', () => transactionModal('income
 $('#add-card-btn').addEventListener('click', addCardModal);
 $('#add-card-btn-2').addEventListener('click', addCardModal);
 $('#view-all-btn').addEventListener('click', viewAllModal);
-$('#bell-btn').addEventListener('click', () => toast('You are all caught up ✨'));
+$('#bell-btn').addEventListener('click', () => showScreen('notifications'));
+$('#notifications-back').addEventListener('click', () => showScreen('home'));
 
 $('#store-full-card-numbers').addEventListener('change', async (e) => {
   const checkbox = e.target;

@@ -771,3 +771,9 @@ input, select { font-family: inherit; font-size: 15px; }
 
 html { scroll-behavior: auto; }
 .sheet, .backdrop { will-change: transform, opacity; }
+
+.topbar-back { display: flex; align-items: center; gap: 12px; }
+.empty-state { display: grid; justify-items: center; gap: 8px; padding: 72px 24px; text-align: center; }
+.empty-state svg { width: 44px; height: 44px; margin-bottom: 8px; fill: none; stroke: var(--ink-3); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.empty-state h2 { margin: 0; font-size: 18px; font-weight: 700; }
+.empty-state p { margin: 0; max-width: 260px; color: var(--ink-2); font-size: 13px; line-height: 1.5; }
