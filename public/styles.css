@@ -777,3 +777,5 @@ html { scroll-behavior: auto; }
 .empty-state svg { width: 44px; height: 44px; margin-bottom: 8px; fill: none; stroke: var(--ink-3); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .empty-state h2 { margin: 0; font-size: 18px; font-weight: 700; }
 .empty-state p { margin: 0; max-width: 260px; color: var(--ink-2); font-size: 13px; line-height: 1.5; }
+
+.physical-card-number { overflow-wrap: anywhere; }

@@ -240,6 +240,7 @@ function cardFace(card, layer = 'front', expanded = false) {
   const isAccount = card.kind === 'account';
   const hidden = state.revealedBalanceCardId !== Number(card.id);
   const id = Number(card.id);
+  const revealedNumber = !hidden && state.storeFullCardNumbers && state.revealedCardNumberId === id ? state.revealedCardNumber : null;
   const holder = escapeHtml(card.holder_name || 'Card holder');
   const type = escapeHtml(card.card_type || card.type || (isAccount ? 'Bank Account' : 'Physical Card'));
   const colorStyle = cardColorTokens(card.card_color || '#252827', layer === 'back');
@@ -258,7 +259,7 @@ function cardFace(card, layer = 'front', expanded = false) {
     <div class="physical-card-balance">
       <span class="card-balance-label">Available Balance</span>
       <span class="card-balance-value ${hidden ? 'is-hidden' : ''}" data-card-balance="${id}" aria-label="${hidden ? 'Balance hidden' : `Balance ${money(card.balance, card.currency || state.displayCurrency)}`}" aria-live="polite">${hidden ? '••••••' : formattedBalance(card)}</span>
-      <span class="physical-card-number" role="text" aria-label="${isAccount ? 'Account' : 'Card'} ending in ${escapeHtml(card.last4 || '0000')}">${!isAccount && !hidden && state.storeFullCardNumbers && state.revealedCardNumberId === id && state.revealedCardNumber ? escapeHtml(state.revealedCardNumber) : `<span aria-hidden="true">•••• &nbsp; •••• &nbsp; •••• &nbsp;</span>${escapeHtml(card.last4 || '0000')}`}</span>
+      <span class="physical-card-number" role="text" aria-label="${isAccount ? 'Account' : 'Card'} ending in ${escapeHtml(card.last4 || '0000')}">${!hidden && state.storeFullCardNumbers && state.revealedCardNumberId === id && state.revealedCardNumber ? escapeHtml(state.revealedCardNumber) : `<span aria-hidden="true">•••• &nbsp; •••• &nbsp; •••• &nbsp;</span>${escapeHtml(card.last4 || '0000')}`}</span>
     </div>
     <div class="physical-card-details">
       <div class="card-holder"><span>${isAccount ? escapeHtml(card.provider || 'Account holder') : 'Card Holder'}</span><strong>${holder}</strong></div>
@@ -270,11 +271,11 @@ function cardFace(card, layer = 'front', expanded = false) {
       <dl>
         <div><dt>Type</dt><dd>${type}</dd></div>
         <div><dt>${isAccount ? 'Provider' : 'Network'}</dt><dd>${escapeHtml(isAccount ? card.provider || '' : brandLabel(card.brand))}</dd></div>
-        ${isAccount ? `        <div><dt>Account number</dt><dd>${escapeHtml(card.account_number || '')}</dd></div>` : ''}
+        ${isAccount ? `<div><dt>Account number</dt><dd>${revealedNumber ? escapeHtml(revealedNumber) : `•••• ${escapeHtml(card.last4 || '')}`}</dd></div>` : ''}
         <div><dt>Status</dt><dd>${escapeHtml(status.charAt(0).toUpperCase() + status.slice(1))}</dd></div>
-        <div><dt>Card number</dt><dd>${isAccount ? escapeHtml(card.account_number || '') : (!hidden && state.storeFullCardNumbers && state.revealedCardNumberId === id && state.revealedCardNumber ? escapeHtml(state.revealedCardNumber) : `•••• ${escapeHtml(card.last4 || '0000')}`)}</dd></div>
-        <div><dt>Expires</dt><dd>${String(card.exp_month || 1).padStart(2, '0')}/${card.exp_year || '----'}</dd></div>
-        <div><dt>Cardholder</dt><dd>${holder}</dd></div>
+        ${isAccount ? '' : `<div><dt>Card number</dt><dd>${revealedNumber ? escapeHtml(revealedNumber) : `•••• ${escapeHtml(card.last4 || '0000')}`}</dd></div>`}
+        ${isAccount ? '' : `<div><dt>Expires</dt><dd>${String(card.exp_month || 1).padStart(2, '0')}/${card.exp_year || '----'}</dd></div>`}
+        <div><dt>${isAccount ? 'Account holder' : 'Cardholder'}</dt><dd>${holder}</dd></div>
         <div><dt>Currency</dt><dd>${escapeHtml(card.currency || state.displayCurrency || 'USD')}</dd></div>
       </dl>
     </div>` : ''}
@@ -347,7 +348,10 @@ async function toggleCardBalance(cardId) {
     state.revealedBalanceCardId = card.id;
     state.revealedCardNumber = null;
     state.revealedCardNumberId = null;
-    if (card.kind === 'card' && state.storeFullCardNumbers) {
+    if (card.kind === 'account' && state.storeFullCardNumbers && card.account_number) {
+      state.revealedCardNumber = card.account_number;
+      state.revealedCardNumberId = card.id;
+    } else if (card.kind === 'card' && state.storeFullCardNumbers) {
       try {
         const result = await api(`/api/cards/${card.id}/number`);
         state.revealedCardNumber = result.number;
