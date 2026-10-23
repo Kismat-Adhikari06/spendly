@@ -9,8 +9,14 @@ const state = {
   hiddenBalances: false,
   revealedCardId: null,
   revealedCardNumber: null,
+  revealedCardNumberId: null,
+  revealedBalanceCardId: null,
   storeFullCardNumbers: false,
   displayCurrency: 'NPR',
+  profileName: '',
+  profileLastName: '',
+  profileNamePrompted: false,
+  profilePhoto: '',
   cardSelectionChanged: false,
   expandedCardId: null,
   overview: null,
@@ -41,6 +47,21 @@ const CARD_COLOR_PRESETS = [
   { name: 'Burgundy', value: '#59343d' },
   { name: 'Gold', value: '#8a7041' },
 ];
+
+function isValidCardNumber(digits) {
+  let sum = 0;
+  let doubleDigit = false;
+  for (let index = digits.length - 1; index >= 0; index -= 1) {
+    let digit = Number(digits[index]);
+    if (doubleDigit) {
+      digit *= 2;
+      if (digit > 9) digit -= 9;
+    }
+    sum += digit;
+    doubleDigit = !doubleDigit;
+  }
+  return sum % 10 === 0;
+}
 
 function parseHexColor(value) {
   const match = /^#?([0-9a-f]{6})$/i.exec(String(value || ''));
@@ -146,12 +167,44 @@ async function refresh() {
   renderAll();
 }
 
+/* ---------------------------------------------------------- backup nudge */
+
+const BACKUP_KEY = 'spendly.lastBackupAt';
+const BACKUP_SNOOZE_KEY = 'spendly.backupSnoozedUntil';
+const BACKUP_INTERVAL_DAYS = 14;
+const DAY_MS = 86400000;
+
+function readStored(key) {
+  try { return Number(localStorage.getItem(key)) || 0; } catch { return 0; }
+}
+
+function writeStored(key, value) {
+  try { localStorage.setItem(key, String(value)); } catch { /* storage unavailable */ }
+}
+
+function renderBackupStatus() {
+  const last = readStored(BACKUP_KEY);
+  const days = last ? Math.floor((Date.now() - last) / DAY_MS) : null;
+  $('#last-backup-label').textContent = last
+    ? `Last backup downloaded ${days === 0 ? 'today' : `${days} day${days === 1 ? '' : 's'} ago`}.`
+    : 'You have not downloaded a backup on this device yet.';
+
+  const hasData = state.cards.length > 0;
+  const overdue = !last || days >= BACKUP_INTERVAL_DAYS;
+  const snoozed = Date.now() < readStored(BACKUP_SNOOZE_KEY);
+  $('#backup-reminder').hidden = !(hasData && overdue && !snoozed);
+  $('#backup-reminder-text').textContent = last
+    ? `It's been ${days} days since your last backup. Your records only live in this browser.`
+    : 'Your records only live in this browser. Download a backup so you can restore them if site data is cleared.';
+}
+
 function renderAll() {
   renderStack();
   renderRecent();
   renderCards();
   renderStats();
   renderProfile();
+  renderBackupStatus();
 }
 
 /* ------------------------------------------------------------- rendering */
@@ -185,7 +238,7 @@ function formattedBalance(card) {
 
 function cardFace(card, layer = 'front', expanded = false) {
   const isAccount = card.kind === 'account';
-  const hidden = !isAccount && state.revealedCardId !== Number(card.id);
+  const hidden = state.revealedBalanceCardId !== Number(card.id);
   const id = Number(card.id);
   const holder = escapeHtml(card.holder_name || 'Card holder');
   const type = escapeHtml(card.card_type || card.type || (isAccount ? 'Bank Account' : 'Physical Card'));
@@ -196,7 +249,7 @@ function cardFace(card, layer = 'front', expanded = false) {
     <div class="physical-card-head">
       <span class="card-kind">${type}</span>
       <div class="card-head-actions">
-        <button type="button" class="balance-toggle" data-toggle-balance="${id}" aria-label="${hidden ? 'Show' : 'Hide'} balance" aria-pressed="${hidden}">
+        <button type="button" class="balance-toggle" data-toggle-balance="${id}" aria-label="${hidden ? 'Show' : 'Hide'} balance and card number" aria-pressed="${!hidden}">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/><path class="eye-slash" d="m3 3 18 18"/></svg>
         </button>
         ${expanded ? '<button type="button" class="collapse-card" data-collapse-card aria-label="Collapse card details"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 14 6-6 6 6"/></svg></button>' : ''}
@@ -205,7 +258,7 @@ function cardFace(card, layer = 'front', expanded = false) {
     <div class="physical-card-balance">
       <span class="card-balance-label">Available Balance</span>
       <span class="card-balance-value ${hidden ? 'is-hidden' : ''}" data-card-balance="${id}" aria-label="${hidden ? 'Balance hidden' : `Balance ${money(card.balance, card.currency || state.displayCurrency)}`}" aria-live="polite">${hidden ? '••••••' : formattedBalance(card)}</span>
-      <span class="physical-card-number" role="text" aria-label="${isAccount ? 'Account' : 'Card'} ending in ${escapeHtml(card.last4 || '0000')}">${!isAccount && !hidden && state.revealedCardNumber ? escapeHtml(state.revealedCardNumber) : `<span aria-hidden="true">•••• &nbsp; •••• &nbsp; •••• &nbsp;</span>${escapeHtml(card.last4 || '0000')}`}</span>
+      <span class="physical-card-number" role="text" aria-label="${isAccount ? 'Account' : 'Card'} ending in ${escapeHtml(card.last4 || '0000')}">${!isAccount && !hidden && state.storeFullCardNumbers && state.revealedCardNumberId === id && state.revealedCardNumber ? escapeHtml(state.revealedCardNumber) : `<span aria-hidden="true">•••• &nbsp; •••• &nbsp; •••• &nbsp;</span>${escapeHtml(card.last4 || '0000')}`}</span>
     </div>
     <div class="physical-card-details">
       <div class="card-holder"><span>${isAccount ? escapeHtml(card.provider || 'Account holder') : 'Card Holder'}</span><strong>${holder}</strong></div>
@@ -219,7 +272,7 @@ function cardFace(card, layer = 'front', expanded = false) {
         <div><dt>${isAccount ? 'Provider' : 'Network'}</dt><dd>${escapeHtml(isAccount ? card.provider || '' : brandLabel(card.brand))}</dd></div>
         ${isAccount ? `        <div><dt>Account number</dt><dd>${escapeHtml(card.account_number || '')}</dd></div>` : ''}
         <div><dt>Status</dt><dd>${escapeHtml(status.charAt(0).toUpperCase() + status.slice(1))}</dd></div>
-        <div><dt>Card number</dt><dd>${isAccount ? escapeHtml(card.account_number || '') : (!hidden && state.revealedCardNumber ? escapeHtml(state.revealedCardNumber) : `•••• ${escapeHtml(card.last4 || '0000')}`)}</dd></div>
+        <div><dt>Card number</dt><dd>${isAccount ? escapeHtml(card.account_number || '') : (!hidden && state.storeFullCardNumbers && state.revealedCardNumberId === id && state.revealedCardNumber ? escapeHtml(state.revealedCardNumber) : `•••• ${escapeHtml(card.last4 || '0000')}`)}</dd></div>
         <div><dt>Expires</dt><dd>${String(card.exp_month || 1).padStart(2, '0')}/${card.exp_year || '----'}</dd></div>
         <div><dt>Cardholder</dt><dd>${holder}</dd></div>
         <div><dt>Currency</dt><dd>${escapeHtml(card.currency || state.displayCurrency || 'USD')}</dd></div>
@@ -285,19 +338,23 @@ function renderStack() {
 
 async function toggleCardBalance(cardId) {
   const card = state.cards.find((item) => item.id === Number(cardId));
-  if (!card || card.kind !== 'card') return;
-  if (state.revealedCardId === card.id) {
-    state.revealedCardId = null;
+  if (!card) return;
+  if (state.revealedBalanceCardId === card.id) {
+    state.revealedBalanceCardId = null;
     state.revealedCardNumber = null;
+    state.revealedCardNumberId = null;
   } else {
-    state.revealedCardId = card.id;
-    try {
-      const result = await api(`/api/cards/${card.id}/number`);
-      state.revealedCardNumber = result.number;
-    } catch (err) {
-      state.revealedCardId = null;
-      state.revealedCardNumber = null;
-      toast(err.message);
+    state.revealedBalanceCardId = card.id;
+    state.revealedCardNumber = null;
+    state.revealedCardNumberId = null;
+    if (card.kind === 'card' && state.storeFullCardNumbers) {
+      try {
+        const result = await api(`/api/cards/${card.id}/number`);
+        state.revealedCardNumber = result.number;
+        state.revealedCardNumberId = card.id;
+      } catch (err) {
+        toast(err.message);
+      }
     }
   }
   renderStack();
@@ -307,6 +364,9 @@ async function toggleCardBalance(cardId) {
 function selectCard(id) {
   if (state.expandedCardId !== null) return;
   state.activeCardId = Number(id);
+  state.revealedBalanceCardId = null;
+  state.revealedCardNumber = null;
+  state.revealedCardNumberId = null;
   state.cardOrder = [state.activeCardId, ...state.cardOrder.filter((cardId) => cardId !== state.activeCardId)];
   state.cardSelectionChanged = true;
   renderStack();
@@ -453,6 +513,9 @@ function renderProfile() {
   if (!o) return;
   $('#store-full-card-numbers').checked = state.storeFullCardNumbers;
   $('#display-currency').value = state.displayCurrency;
+  $('#profile-name').textContent = [state.profileName, state.profileLastName].filter(Boolean).join(' ') || 'Your profile';
+  $('#profile-first-name-input').value = state.profileName;
+  $('#profile-last-name-input').value = state.profileLastName;
   $('#stat-month-spend').textContent = transactionMoney(o.month_spend);
   $('#stat-month-income').textContent = transactionMoney(o.month_income);
   const trackedCount = state.cards.length;
@@ -516,6 +579,8 @@ function openCardModal(existingCard = null) {
   const initialColor = existingCard?.card_color || '#252827';
   const initialExpiryYear = existingCard ? String(existingCard.exp_year) : '';
   const initialKind = existingCard?.kind || 'card';
+  const defaultHolderName = [state.profileName, state.profileLastName].filter(Boolean).join(' ').trim();
+  const holderName = existingCard?.holder_name || defaultHolderName;
   openSheet(`
     <h3>${editing ? `Edit ${initialKind === 'account' ? 'Account' : 'Card'}` : 'Add a Card or Account'}</h3>
     <p class="hint">Track a payment card, bank account, or mobile wallet manually. Never enter a PIN or password.</p>
@@ -524,12 +589,12 @@ function openCardModal(existingCard = null) {
       <div class="card-preview" style="${cardColorTokens(initialColor)}"><span>${escapeHtml(existingCard?.card_type || 'Physical Card')}</span><strong>${editing ? money(existingCard.balance, existingCard.currency || state.displayCurrency) : 'Available balance'}</strong><span>•••• &nbsp; •••• &nbsp; •••• &nbsp; ${escapeHtml(existingCard?.last4 || '0000')}</span></div>
       <div class="field">
         <label>Account holder name</label>
-        <input name="holder_name" placeholder="e.g. Your name" value="${escapeHtml(existingCard?.holder_name || '')}" required maxlength="60" />
+        <input name="holder_name" placeholder="e.g. Your name" value="${escapeHtml(holderName)}" required maxlength="60" />
       </div>
       <div class="field" data-card-field>
-        <label>${state.storeFullCardNumbers ? 'Full card number' : 'Last four digits'}</label>
-        <input name="number" type="text" inputmode="numeric" placeholder="${state.storeFullCardNumbers ? (editing ? `Enter full number ending ${escapeHtml(existingCard.last4)}` : '4242 4242 4242 4242') : (editing ? `Current ending: ${escapeHtml(existingCard.last4)}` : '1234')}" ${editing ? `maxlength="${state.storeFullCardNumbers ? '23' : '4'}"` : `required maxlength="${state.storeFullCardNumbers ? '23' : '4'}"`} autocomplete="off" />
-        <span class="field-hint" data-number-storage-hint>${state.storeFullCardNumbers ? 'Storage is on. Enter all 12–19 digits; the saved number stays hidden on Home until you tap the eye.' : 'Storage is off. Enter only the last four digits; no other card digits will be saved.'}</span>
+        <label>Full card number</label>
+        <input name="number" type="text" inputmode="numeric" placeholder="${editing ? `Enter full number ending ${escapeHtml(existingCard.last4)}` : '4242 4242 4242 4242'}" ${editing ? 'maxlength="23"' : 'required maxlength="23"'} autocomplete="off" />
+        <span class="field-hint" data-number-storage-hint>${state.storeFullCardNumbers ? 'Enter all 12–19 digits. Saved locally on this device; tap the eye to reveal it.' : 'Enter all 12–19 digits. Storage is off, so only the last four digits are kept on this device.'}</span>
       </div>
       <div class="field" data-account-field hidden><label>Account type</label><select name="account_kind"><option value="bank" ${existingCard?.account_kind === 'bank' ? 'selected' : ''}>Bank account</option><option value="mobile_wallet" ${existingCard?.account_kind === 'mobile_wallet' ? 'selected' : ''}>Mobile wallet (eSewa, etc.)</option></select></div>
       <div class="field" data-account-field hidden><label>Bank or wallet name</label><input name="provider" placeholder="e.g. Global IME Bank or eSewa" value="${escapeHtml(existingCard?.provider || '')}" maxlength="60" /></div>
@@ -569,23 +634,19 @@ function openCardModal(existingCard = null) {
     sheet.querySelectorAll('[data-account-field]').forEach((field) => { field.hidden = kind !== 'account'; });
     if (numberInput) {
       numberInput.required = kind === 'card' && !editing;
-      numberInput.maxLength = state.storeFullCardNumbers ? 23 : 4;
+      numberInput.maxLength = 23;
     }
     sheet.querySelectorAll('[data-card-field] input[name="exp_month"], [data-card-field] input[name="exp_year"]').forEach((input) => { input.required = kind === 'card' && !editing; });
   };
   const updateNumberMode = () => {
     if (!numberInput) return;
     const fullStorage = state.storeFullCardNumbers;
-    const numberLabel = sheet.querySelector('[data-card-field] label:not([for])');
-    if (numberLabel) numberLabel.textContent = fullStorage ? 'Full card number' : 'Last four digits';
-    numberInput.maxLength = fullStorage ? 23 : 4;
-    numberInput.placeholder = fullStorage
-      ? (editing ? `Enter full number ending ${existingCard.last4}` : '4242 4242 4242 4242')
-      : (editing ? `Current ending: ${existingCard.last4}` : '1234');
+    numberInput.maxLength = 23;
+    numberInput.placeholder = editing ? `Enter full number ending ${existingCard.last4}` : '4242 4242 4242 4242';
     const hint = sheet.querySelector('[data-number-storage-hint]');
     if (hint) hint.textContent = fullStorage
-      ? 'Storage is on. Enter all 12–19 digits; the saved number stays hidden on Home until you tap the eye.'
-      : 'Storage is off. Enter only the last four digits; no other card digits will be saved.';
+      ? 'Enter all 12–19 digits. Saved locally on this device; tap the eye to reveal it.'
+      : 'Enter all 12–19 digits. Storage is off, so only the last four digits are kept on this device.';
   };
   setKindFields(initialKind);
   updateNumberMode();
@@ -640,14 +701,13 @@ function openCardModal(existingCard = null) {
         if (kind === 'card') {
           const rawNumber = String(f.get('number') || '').trim();
           const enteredNumber = rawNumber.replace(/\D/g, '');
-          if (storeFullAtSubmit) {
-            if (rawNumber && !/^[0-9 -]+$/.test(rawNumber)) throw new Error('Card number may contain only digits, spaces, or dashes.');
-            if (rawNumber && (enteredNumber.length < 12 || enteredNumber.length > 19)) throw new Error('Enter the complete card number (12-19 digits), or leave it blank to keep the current one.');
-            body.last4 = enteredNumber ? enteredNumber.slice(-4) : existingCard.last4;
-            if (enteredNumber) body.full_number = enteredNumber;
+          if (rawNumber && !/^[0-9 -]+$/.test(rawNumber)) throw new Error('Card number may contain only digits, spaces, or dashes.');
+          if (rawNumber && (enteredNumber.length < 12 || enteredNumber.length > 19 || !isValidCardNumber(enteredNumber))) throw new Error('Enter a valid complete card number (12-19 digits), or leave it blank to keep the current one.');
+          if (rawNumber) {
+            body.last4 = enteredNumber.slice(-4);
+            body.full_number = enteredNumber;
           } else {
-            if (rawNumber && !/^\d{4}$/.test(rawNumber)) throw new Error('Storage is off: enter exactly the last four digits.');
-            body.last4 = rawNumber || existingCard.last4;
+            body.last4 = existingCard.last4;
           }
         }
         ({ card } = await api(`/api/cards/${existingCard.id}`, { method: 'PUT', body }));
@@ -655,17 +715,15 @@ function openCardModal(existingCard = null) {
         if (kind === 'card') {
           const rawNumber = String(f.get('number') || '').trim();
           const digits = rawNumber.replace(/\D/g, '');
-          if (storeFullAtSubmit) {
-            if (!/^[0-9 -]+$/.test(rawNumber) || digits.length < 12 || digits.length > 19) throw new Error('Storage is on: enter the complete card number with 12-19 digits.');
-          } else if (!/^\d{4}$/.test(rawNumber)) {
-            throw new Error('Storage is off: enter only the last four digits.');
-          }
-          body.number = storeFullAtSubmit ? digits : rawNumber;
+          if (!/^[0-9 -]+$/.test(rawNumber) || digits.length < 12 || digits.length > 19 || !isValidCardNumber(digits)) throw new Error('Enter a valid complete card number with 12-19 digits.');
+          body.number = digits;
         }
         ({ card } = await api('/api/cards', { method: 'POST', body }));
       }
       state.revealedCardId = null;
       state.revealedCardNumber = null;
+      state.revealedCardNumberId = null;
+      state.revealedBalanceCardId = null;
       if (!editing) state.activeCardId = card.id;
       state.cardOrder = state.cardOrder.filter((id) => id !== card.id);
       if (!editing) state.cardOrder.unshift(card.id);
@@ -845,9 +903,20 @@ function moreModal() {
 
 /* ------------------------------------------------------------------- nav */
 
-function showScreen(name) {
-  if (!$(`#screen-${name}`)) name = 'home';
-  if (location.hash.slice(1) !== name) history.replaceState(null, '', `#${name}`);
+const SCREENS = ['home', 'cards', 'stats', 'profile'];
+
+// Current screen from the URL path (/cards), with legacy #cards links still honoured.
+function screenFromLocation() {
+  const name = location.pathname.replace(/^\/+|\/+$/g, '') || location.hash.slice(1);
+  return SCREENS.includes(name) ? name : 'home';
+}
+
+function showScreen(name, { push = true } = {}) {
+  if (!SCREENS.includes(name)) name = 'home';
+  const path = name === 'home' ? '/' : `/${name}`;
+  if (location.pathname !== path || location.hash) {
+    history[push ? 'pushState' : 'replaceState'](null, '', path);
+  }
   document.querySelectorAll('.screen').forEach((s) => s.classList.remove('active'));
   $(`#screen-${name}`).classList.add('active');
   document.querySelectorAll('.nav-item').forEach((n) =>
@@ -859,6 +928,151 @@ function showScreen(name) {
 document.querySelectorAll('.nav-item').forEach((n) =>
   n.addEventListener('click', () => showScreen(n.dataset.screen))
 );
+
+window.addEventListener('popstate', () => showScreen(screenFromLocation(), { push: false }));
+
+function renderProfilePhoto() {
+  for (const image of [$('#home-avatar'), $('#profile-avatar')]) {
+    if (state.profilePhoto) image.src = state.profilePhoto;
+    else image.removeAttribute('src');
+    image.hidden = !state.profilePhoto;
+  }
+  $('#profile-avatar-placeholder').hidden = Boolean(state.profilePhoto);
+  $('#profile-photo-button').textContent = state.profilePhoto ? 'Change photo' : 'Add photo';
+}
+
+async function readProfilePhoto(file) {
+  if (!file) return '';
+  if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)) throw new Error('Choose a JPG, PNG, WebP, or GIF photo.');
+  if (file.size > 1_500_000) throw new Error('Choose an image smaller than 1.5 MB.');
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('Could not read this image.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function saveProfileName(value, prompted = false, photo = state.profilePhoto, lastName = state.profileLastName) {
+  const first = String(value || '').trim().slice(0, 30);
+  const last = String(lastName || '').trim().slice(0, 30);
+  const body = { profile_name: [first, last].filter(Boolean).join(' '), profile_first_name: first, profile_last_name: last, profile_photo: photo || '', profile_setup_version: 2 };
+  if (prompted) body.profile_name_prompted = true;
+  const { settings } = await api('/api/settings', { method: 'PUT', body });
+  state.profileName = settings.profile_first_name || first;
+  state.profileLastName = settings.profile_last_name || last;
+  state.profileNamePrompted = settings.profile_name_prompted === true;
+  state.profilePhoto = settings.profile_photo || '';
+  $('#home-greeting').textContent = state.profileName ? `Hello ${state.profileName}` : 'Hello there';
+  $('#profile-name').textContent = [state.profileName, state.profileLastName].filter(Boolean).join(' ') || 'Your profile';
+  $('#profile-first-name-input').value = state.profileName;
+  $('#profile-last-name-input').value = state.profileLastName;
+  renderProfilePhoto();
+}
+
+async function promptForName() {
+  const root = $('#onboarding-root');
+  root.hidden = false;
+  const firstNameInput = $('#onboarding-first-name');
+  const lastNameInput = $('#onboarding-last-name');
+  const fileInput = $('#onboarding-photo-input');
+  let photo = '';
+  firstNameInput.value = '';
+  lastNameInput.value = '';
+  fileInput.value = '';
+  const preview = $('#onboarding-avatar');
+  preview.removeAttribute('src');
+  preview.hidden = true;
+  $('.onboarding-person-icon').hidden = false;
+  $('#onboarding-continue').disabled = false;
+  fileInput.onchange = async () => {
+    try {
+      photo = await readProfilePhoto(fileInput.files[0]);
+      const preview = $('#onboarding-avatar');
+      preview.src = photo;
+      preview.hidden = !photo;
+      $('.onboarding-person-icon').hidden = Boolean(photo);
+    } catch (error) {
+      fileInput.value = '';
+      photo = '';
+      toast(error.message);
+    }
+  };
+  await new Promise((resolve) => {
+    $('#onboarding-back').onclick = () => {
+      root.hidden = true;
+      resolve();
+    };
+    $('.onboarding-dialog').onsubmit = (event) => {
+      event.preventDefault();
+      $('#onboarding-continue').click();
+    };
+    firstNameInput.onkeydown = lastNameInput.onkeydown = (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        $('#onboarding-continue').click();
+      }
+    };
+    $('#onboarding-continue').onclick = async () => {
+      const button = $('#onboarding-continue');
+      button.disabled = true;
+      try {
+        const first = firstNameInput.value.trim();
+        const last = lastNameInput.value.trim();
+        if (!first || !last) throw new Error('Enter your first and last name to continue.');
+        photo = fileInput.files[0] ? await readProfilePhoto(fileInput.files[0]) : photo;
+        await saveProfileName(first, true, photo, last);
+        firstNameInput.value = '';
+        lastNameInput.value = '';
+        fileInput.value = '';
+        $('.onboarding-dialog').onsubmit = null;
+        firstNameInput.onkeydown = null;
+        lastNameInput.onkeydown = null;
+        root.hidden = true;
+        resolve();
+      } catch (error) {
+        button.disabled = false;
+        toast(error.message);
+      }
+    };
+  });
+}
+
+$('#profile-save-btn').addEventListener('click', async () => {
+  const firstInput = $('#profile-first-name-input');
+  const lastInput = $('#profile-last-name-input');
+  try {
+    if (!firstInput.value.trim() || !lastInput.value.trim()) throw new Error('Enter your first and last name.');
+    await saveProfileName(firstInput.value, true, state.profilePhoto, lastInput.value);
+    toast('Profile saved on this device');
+  } catch (err) {
+    toast(err.message);
+  }
+});
+
+$('#profile-photo-button').addEventListener('click', async () => {
+  if (state.profilePhoto && confirm('Remove your profile photo from this device?')) {
+    try {
+      await saveProfileName(state.profileName, true, '', state.profileLastName);
+      toast('Profile photo removed from this device');
+    } catch (err) {
+      toast(err.message);
+    }
+    return;
+  }
+  $('#profile-photo-input').click();
+});
+$('#profile-photo-input').addEventListener('change', async (event) => {
+  try {
+    const photo = await readProfilePhoto(event.target.files[0]);
+    await saveProfileName(state.profileName, true, photo, state.profileLastName);
+    toast(photo ? 'Profile photo saved on this device' : 'Profile photo removed');
+  } catch (err) {
+    toast(err.message);
+  } finally {
+    event.target.value = '';
+  }
+});
 
 $('#record-expense-btn').addEventListener('click', () => transactionModal('expense'));
 $('#record-income-btn').addEventListener('click', () => transactionModal('income'));
@@ -878,6 +1092,8 @@ $('#store-full-card-numbers').addEventListener('change', async (e) => {
     state.storeFullCardNumbers = settings.store_full_card_numbers;
     state.revealedCardId = null;
     state.revealedCardNumber = null;
+    state.revealedCardNumberId = null;
+    state.revealedBalanceCardId = null;
     await refresh();
     toast(checkbox.checked ? 'Full card-number storage enabled' : 'Saved full card numbers permanently deleted');
   } catch (err) {
@@ -907,7 +1123,7 @@ $('#display-currency').addEventListener('change', async (e) => {
   }
 });
 
-$('#export-backup-btn').addEventListener('click', async () => {
+async function downloadBackup() {
   try {
     const backup = await window.spendlyLocalStore.exportBackup();
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
@@ -917,10 +1133,19 @@ $('#export-backup-btn').addEventListener('click', async () => {
     link.download = `spendly-backup-${new Date().toISOString().slice(0, 10)}.json`;
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+    writeStored(BACKUP_KEY, Date.now());
+    renderBackupStatus();
     toast('Backup downloaded to your device');
   } catch (err) {
     toast(err.message);
   }
+}
+
+$('#export-backup-btn').addEventListener('click', downloadBackup);
+$('#backup-reminder-now').addEventListener('click', downloadBackup);
+$('#backup-reminder-later').addEventListener('click', () => {
+  writeStored(BACKUP_SNOOZE_KEY, Date.now() + 3 * DAY_MS);
+  renderBackupStatus();
 });
 
 const backupFile = $('#backup-file');
@@ -936,10 +1161,17 @@ backupFile.addEventListener('change', async () => {
     const { settings } = await api('/api/meta');
     state.storeFullCardNumbers = settings.store_full_card_numbers === true;
     state.displayCurrency = settings.display_currency || 'NPR';
+    state.profileName = settings.profile_first_name || settings.profile_name || '';
+    state.profileLastName = settings.profile_last_name || '';
+    state.profileNamePrompted = settings.profile_name_prompted === true;
+    state.profilePhoto = settings.profile_photo || '';
+    $('#home-greeting').textContent = state.profileName ? `Hello ${state.profileName}` : 'Hello there';
+    renderProfilePhoto();
     $('#store-full-card-numbers').checked = state.storeFullCardNumbers;
     $('#display-currency').value = state.displayCurrency;
     state.revealedCardId = null;
     state.revealedCardNumber = null;
+    state.revealedCardNumberId = null;
     await refresh();
     toast('Backup restored on this device');
   } catch (err) {
@@ -954,9 +1186,27 @@ $('#reset-btn').addEventListener('click', async () => {
   await window.spendlyLocalStore.clearAll();
   state.storeFullCardNumbers = false;
   state.displayCurrency = 'NPR';
+  state.profileName = '';
+  state.profileLastName = '';
+  state.profileNamePrompted = false;
+  state.profilePhoto = '';
+  renderProfilePhoto();
+  $('#home-greeting').textContent = 'Hello there';
+  $('#profile-name').textContent = 'Your profile';
+  $('#profile-first-name-input').value = '';
+  $('#profile-last-name-input').value = '';
+  $('#onboarding-first-name').value = '';
+  $('#onboarding-last-name').value = '';
+  $('#onboarding-photo-input').value = '';
+  $('.onboarding-person-icon').hidden = false;
+  $('#onboarding-avatar').removeAttribute('src');
+  $('#onboarding-avatar').hidden = true;
   state.revealedCardId = null;
   state.revealedCardNumber = null;
+  state.revealedCardNumberId = null;
+  state.revealedBalanceCardId = null;
   await refresh();
+  $('#onboarding-root').hidden = false;
   toast('All local data wiped');
 });
 
@@ -1067,8 +1317,18 @@ document.body.addEventListener('click', async (e) => {
     state.themes = meta.themes;
     state.storeFullCardNumbers = meta.settings?.store_full_card_numbers === true;
     state.displayCurrency = meta.settings?.display_currency || 'USD';
+    state.profileName = meta.settings?.profile_first_name || meta.settings?.profile_name || '';
+    state.profileLastName = meta.settings?.profile_last_name || '';
+    state.profileNamePrompted = meta.settings?.profile_name_prompted === true;
+    state.profilePhoto = meta.settings?.profile_photo || '';
+    $('#home-greeting').textContent = state.profileName ? `Hello ${state.profileName}` : 'Hello there';
+    renderProfilePhoto();
     await refresh();
-    showScreen(location.hash.slice(1) || 'home');
+    showScreen(screenFromLocation(), { push: false });
+    if (!state.profileName.trim() || !state.profileLastName.trim()) {
+      $('#onboarding-root').hidden = false;
+      await promptForName();
+    }
   } catch (err) {
     toast('Failed to load data');
     console.error(err);

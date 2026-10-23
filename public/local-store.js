@@ -129,16 +129,9 @@
     } else {
       const storeFull = await setting('store_full_card_numbers', false);
       const rawNumber = String(number || '').trim();
-      let digits;
-      if (storeFull) {
-        digits = rawNumber.replace(/[\s-]/g, '');
-        if (!/^[0-9 -]+$/.test(rawNumber) || !/^\d{12,19}$/.test(digits)) fail('Storage is on: enter the complete card number with 12-19 digits.');
-        card.full_number = digits;
-      } else {
-        if (!/^\d{4}$/.test(rawNumber)) fail('Storage is off: enter only the last four digits.');
-        digits = rawNumber;
-        card.full_number = null;
-      }
+      const digits = rawNumber.replace(/[\s-]/g, '');
+      if (!/^[0-9 -]+$/.test(rawNumber) || !/^\d{12,19}$/.test(digits) || !isValidCardNumber(digits)) fail('Enter a valid complete card number with 12-19 digits.');
+      card.full_number = storeFull ? digits : null;
       if (brand !== undefined && !SUPPORTED_BRANDS.includes(brand)) fail('Choose a supported card network.');
       const month = Number(exp_month);
       const yearInput = Number(exp_year);
@@ -154,6 +147,21 @@
     }
     card.id = await add('cards', card);
     return { card: publicCard(card) };
+  }
+
+  function isValidCardNumber(digits) {
+    let sum = 0;
+    let doubleDigit = false;
+    for (let index = digits.length - 1; index >= 0; index -= 1) {
+      let digit = Number(digits[index]);
+      if (doubleDigit) {
+        digit *= 2;
+        if (digit > 9) digit -= 9;
+      }
+      sum += digit;
+      doubleDigit = !doubleDigit;
+    }
+    return sum % 10 === 0;
   }
 
   function detectBrand(digits) {
@@ -200,13 +208,14 @@
       if (rawFull && !/^[0-9 -]+$/.test(rawFull)) fail('Card number must contain digits only, with optional spaces or dashes.');
       const digits = rawFull.replace(/[\s-]/g, '');
       let last4 = body.last4 === undefined ? card.last4 : String(body.last4);
-      if (fullStorage && rawFull) {
-        if (!/^\d{12,19}$/.test(digits)) fail('Full card number must be 12-19 digits.');
+      if (rawFull) {
+        if (!/^\d{12,19}$/.test(digits) || !isValidCardNumber(digits)) fail('Enter a valid complete card number with 12-19 digits.');
         if (last4 !== digits.slice(-4)) fail('Last four digits must match the complete card number.');
-        updated.full_number = digits;
-      } else if (!fullStorage && body.last4 !== undefined && last4 !== card.last4) {
-        if (!/^\d{4}$/.test(last4)) fail('When full-number storage is off, enter exactly the last four digits.');
+        updated.full_number = fullStorage ? digits : null;
+      } else if (!fullStorage) {
         updated.full_number = null;
+      } else if (last4 !== card.last4) {
+        fail('Enter the complete card number to change its last four digits.');
       }
       updated.last4 = last4;
       updated.exp_month = month;
@@ -347,7 +356,7 @@
     let match;
 
     if (method === 'GET' && pathname === '/api/meta') {
-      return { categories: CATEGORIES, themes: THEMES, settings: { store_full_card_numbers: await setting('store_full_card_numbers', false), display_currency: await setting('display_currency', 'NPR') } };
+      return { categories: CATEGORIES, themes: THEMES, settings: { store_full_card_numbers: await setting('store_full_card_numbers', false), display_currency: await setting('display_currency', 'NPR'), profile_name: await setting('profile_name', ''), profile_first_name: await setting('profile_first_name', ''), profile_last_name: await setting('profile_last_name', ''), profile_name_prompted: await setting('profile_name_prompted', false), profile_photo: await setting('profile_photo', ''), profile_setup_version: await setting('profile_setup_version', 0) } };
     }
     if (method === 'GET' && pathname === '/api/cards') return { cards: (await cardRows()).map(publicCard) };
     if (method === 'POST' && pathname === '/api/cards') return createCard(body);
@@ -384,7 +393,41 @@
         }
       }
       if (body.display_currency !== undefined) await convertCurrency(body.display_currency);
-      return { settings: { store_full_card_numbers: await setting('store_full_card_numbers', false), display_currency: await setting('display_currency', 'NPR') } };
+      if (body.profile_name !== undefined) {
+        if (typeof body.profile_name !== 'string') fail('Name must be text.');
+        await saveSetting('profile_name', body.profile_name.trim().slice(0, 40));
+      }
+      if (body.profile_first_name !== undefined) {
+        if (typeof body.profile_first_name !== 'string' || body.profile_first_name.length > 30) fail('First name must be 30 characters or fewer.');
+        await saveSetting('profile_first_name', body.profile_first_name.trim());
+      }
+      if (body.profile_last_name !== undefined) {
+        if (typeof body.profile_last_name !== 'string' || body.profile_last_name.length > 30) fail('Last name must be 30 characters or fewer.');
+        await saveSetting('profile_last_name', body.profile_last_name.trim());
+      }
+      if (body.profile_name_prompted !== undefined) {
+        if (typeof body.profile_name_prompted !== 'boolean') fail('Name prompt status must be true or false.');
+        await saveSetting('profile_name_prompted', body.profile_name_prompted);
+      }
+      if (body.profile_photo !== undefined) {
+        if (typeof body.profile_photo !== 'string' || body.profile_photo.length > 2_000_000
+          || (body.profile_photo && !/^data:image\/(?:png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+=*$/.test(body.profile_photo))) {
+          fail('Choose a supported image smaller than 1.5 MB.');
+        }
+        await saveSetting('profile_photo', body.profile_photo);
+      }
+      if (body.profile_setup_version !== undefined && body.profile_setup_version !== 2) fail('Unsupported profile setup version.');
+      if (body.profile_setup_version === 2
+        && (!String(body.profile_first_name || '').trim() || !String(body.profile_last_name || '').trim())) {
+        fail('Enter your first and last name to complete your profile.');
+      }
+      if (body.profile_name !== undefined && !await setting('profile_setup_version', 0)) await saveSetting('profile_setup_version', 1);
+      if (body.profile_setup_version !== undefined) {
+        if (body.profile_setup_version !== 2) fail('Unsupported profile setup version.');
+        await saveSetting('profile_setup_version', 2);
+      }
+      if (body.profile_setup_version === 2 && body.profile_name_prompted === undefined) await saveSetting('profile_name_prompted', true);
+      return { settings: { store_full_card_numbers: await setting('store_full_card_numbers', false), display_currency: await setting('display_currency', 'NPR'), profile_name: await setting('profile_name', ''), profile_first_name: await setting('profile_first_name', ''), profile_last_name: await setting('profile_last_name', ''), profile_name_prompted: await setting('profile_name_prompted', false), profile_photo: await setting('profile_photo', ''), profile_setup_version: await setting('profile_setup_version', 0) } };
     }
     return fail(`Unsupported local action: ${method} ${pathname}`);
   }
@@ -417,6 +460,15 @@
         }
         cardIds.add(card.id);
       }
+      const storeFullNumbers = backup.settings.find((item) => item?.key === 'store_full_card_numbers')?.value === true;
+      for (const card of backup.cards) {
+        if (card.kind === 'card' && card.full_number !== undefined && card.full_number !== null) {
+          if (typeof card.full_number !== 'string' || !/^\d{12,19}$/.test(card.full_number) || !isValidCardNumber(card.full_number)
+            || card.full_number.slice(-4) !== card.last4 || !storeFullNumbers) {
+            fail('The backup contains invalid or disallowed full card-number data.');
+          }
+        }
+      }
       const transactionIds = new Set();
       for (const item of backup.transactions) {
         if (!item || !Number.isSafeInteger(item.id) || item.id < 1 || transactionIds.has(item.id)
@@ -428,11 +480,23 @@
       }
       const settingKeys = new Set();
       for (const item of backup.settings) {
-        if (!item || !['store_full_card_numbers', 'display_currency'].includes(item.key) || settingKeys.has(item.key)) {
+        if (!item || !['store_full_card_numbers', 'display_currency', 'profile_name', 'profile_first_name', 'profile_last_name', 'profile_name_prompted', 'profile_photo', 'profile_setup_version'].includes(item.key) || settingKeys.has(item.key)) {
           fail('The backup contains invalid preference data.');
         }
         if (item.key === 'store_full_card_numbers' && typeof item.value !== 'boolean') fail('The backup contains an invalid card-number preference.');
         if (item.key === 'display_currency' && (typeof item.value !== 'string' || !CURRENCIES.includes(item.value))) fail('The backup contains an invalid currency preference.');
+        if (item.key === 'profile_name' && (typeof item.value !== 'string' || item.value.length > 40)) fail('The backup contains an invalid profile name.');
+        if (item.key === 'profile_first_name' && (typeof item.value !== 'string' || item.value.length > 30)) fail('The backup contains an invalid first name.');
+        if (item.key === 'profile_last_name' && (typeof item.value !== 'string' || item.value.length > 30)) fail('The backup contains an invalid last name.');
+        if (item.key === 'profile_name_prompted' && typeof item.value !== 'boolean') fail('The backup contains an invalid name-prompt preference.');
+        if (item.key === 'profile_photo' && (typeof item.value !== 'string' || item.value.length > 2_000_000
+          || (item.value && !/^data:image\/(?:png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+=*$/.test(item.value)))) fail('The backup contains an invalid profile photo.');
+        if (item.key === 'profile_setup_version' && ![1, 2].includes(item.value)) fail('The backup contains an invalid profile setup version.');
+        if (item.key === 'profile_setup_version' && item.value === 2
+          && (!backup.settings.some((entry) => entry.key === 'profile_first_name' && typeof entry.value === 'string' && entry.value.trim())
+            || !backup.settings.some((entry) => entry.key === 'profile_last_name' && typeof entry.value === 'string' && entry.value.trim()))) {
+          fail('The backup is missing a first or last name.');
+        }
         settingKeys.add(item.key);
       }
       const db = await openDatabase();

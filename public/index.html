@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
   <div class="app">
@@ -18,16 +18,24 @@
     <section class="screen active" id="screen-home">
       <header class="topbar">
         <div>
-          <h1 class="hello">Hello DailyFlutterUI</h1>
+          <h1 class="hello" id="home-greeting">Hello there</h1>
           <p class="sub">Let's save your money.</p>
         </div>
         <div class="topbar-actions">
           <button class="icon-btn has-dot" id="bell-btn" aria-label="Notifications">
             <svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
           </button>
-          <img class="avatar" src="https://i.pravatar.cc/96?img=13" alt="Profile photo" />
+          <img class="avatar" id="home-avatar" alt="Profile photo" hidden>
         </div>
       </header>
+
+      <div class="backup-reminder" id="backup-reminder" hidden>
+        <p id="backup-reminder-text"></p>
+        <div class="backup-reminder-actions">
+          <button type="button" id="backup-reminder-now">Back up now</button>
+          <button type="button" class="ghost" id="backup-reminder-later">Later</button>
+        </div>
+      </div>
 
       <div class="cardstack" id="card-stack"></div>
 
@@ -119,10 +127,19 @@
       </header>
 
       <div class="profile-card">
-        <img class="avatar big" src="https://i.pravatar.cc/128?img=13" alt="Profile photo" />
-        <div>
-          <h3 id="profile-name">DailyFlutterUI</h3>
-          <p class="muted">Member since 2026</p>
+        <div class="profile-identity">
+          <div class="profile-avatar-wrap">
+            <img class="avatar big" id="profile-avatar" alt="Profile photo" hidden>
+            <span class="profile-avatar-placeholder" id="profile-avatar-placeholder" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a8 8 0 0 1 16 0v1"/></svg></span>
+          </div>
+          <div class="profile-identity-copy"><h3 id="profile-name">Your profile</h3><p>Your details are saved on this device.</p></div>
+          <button type="button" class="profile-photo-button" id="profile-photo-button">Add photo</button>
+          <input id="profile-photo-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden>
+        </div>
+        <div class="profile-edit-fields">
+          <label class="profile-edit-field" for="profile-first-name-input"><span>First name</span><input id="profile-first-name-input" type="text" maxlength="30" autocomplete="given-name" placeholder="Enter your first name"></label>
+          <label class="profile-edit-field" for="profile-last-name-input"><span>Last name</span><input id="profile-last-name-input" type="text" maxlength="30" autocomplete="family-name" placeholder="Enter your last name"></label>
+          <button type="button" class="profile-save-button" id="profile-save-btn">Save profile</button>
         </div>
       </div>
 
@@ -134,10 +151,10 @@
       <div class="panel">
         <div class="panel-head"><h2>Preferences</h2></div>
         <div class="setting-row">
-          <div class="setting-copy"><strong>Store full card numbers</strong><span>Saved in this browser only; off keeps the last four digits.</span></div>
+          <div class="setting-copy"><strong>Store full card numbers</strong><span>Full card numbers are only saved in this browser when on. Off still requires full entry, but keeps only the last four digits.</span></div>
           <label class="switch"><input id="store-full-card-numbers" type="checkbox" checked aria-describedby="card-number-warning"><span class="switch-track" aria-hidden="true"></span></label>
         </div>
-        <p class="setting-warning" id="card-number-warning">Full card numbers are sensitive. Turning this off permanently deletes any saved full card numbers; the app cannot restore them.</p>
+        <p class="setting-warning" id="card-number-warning">Card numbers are sensitive. Turning this off permanently deletes saved full numbers; only the last four digits will remain and the full number can’t be recovered from this browser.</p>
         <div class="field profile-currency-field">
           <label for="display-currency">Display currency</label>
           <select id="display-currency"><option value="NPR">NPR — Nepalese rupee</option><option value="USD">USD — US dollar</option><option value="INR">INR — Indian rupee</option><option value="EUR">EUR — Euro</option><option value="GBP">GBP — British pound</option><option value="CAD">CAD — Canadian dollar</option><option value="AUD">AUD — Australian dollar</option><option value="JPY">JPY — Japanese yen</option></select>
@@ -150,6 +167,7 @@
         <button class="row-btn" id="export-backup-btn" type="button">Download backup</button>
         <button class="row-btn" id="import-backup-btn" type="button">Restore from backup</button>
         <input id="backup-file" type="file" accept="application/json,.json" hidden>
+        <p class="field-hint" id="last-backup-label"></p>
         <p class="field-hint">Backups stay on this device unless you choose where to save or share the downloaded file. They may contain full card numbers if that option is enabled.</p>
         <button class="row-btn danger" id="reset-btn">
           <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
@@ -186,10 +204,38 @@
     <div class="sheet" id="sheet"></div>
   </div>
 
+  <div class="onboarding-root" id="onboarding-root" hidden>
+    <section class="onboarding-dialog" role="dialog" aria-modal="true" aria-labelledby="onboarding-title" aria-describedby="onboarding-description">
+      <button type="button" class="onboarding-back" id="onboarding-back" aria-label="Back">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+      </button>
+      <h1 id="onboarding-title">Create Your Profile</h1>
+      <p id="onboarding-description">Add a profile picture and your name<br>to get started.</p>
+      <label class="onboarding-avatar-upload" for="onboarding-photo-input" aria-label="Choose an optional profile picture">
+        <img id="onboarding-avatar" alt="Profile photo preview" hidden>
+        <svg class="onboarding-person-icon" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="21" r="10"/><path d="M12 54c1-12 8-18 20-18s19 6 20 18c-12 7-28 7-40 0Z"/></svg>
+        <span class="onboarding-camera" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h3l2-3h6l2 3h3a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z"/><circle cx="12" cy="13" r="4"/></svg></span>
+        <input id="onboarding-photo-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" aria-label="Upload profile picture (optional)">
+      </label>
+      <div class="onboarding-name-fields">
+        <label class="onboarding-name-field" for="onboarding-first-name">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a8 8 0 0 1 16 0v1"/></svg>
+          <span><strong>First Name</strong><input id="onboarding-first-name" type="text" maxlength="30" autocomplete="given-name" placeholder="Enter your first name" required></span>
+        </label>
+        <label class="onboarding-name-field" for="onboarding-last-name">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a8 8 0 0 1 16 0v1"/></svg>
+          <span><strong>Last Name</strong><input id="onboarding-last-name" type="text" maxlength="30" autocomplete="family-name" placeholder="Enter your last name" required></span>
+        </label>
+      </div>
+      <button type="button" class="onboarding-next" id="onboarding-continue"><span>Next</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></button>
+      <p class="onboarding-privacy">Your data stays on this device. Spendly has no account and sends nothing to a server. Download a backup from Profile now and then, since clearing browser data erases everything.</p>
+    </section>
+  </div>
+
   <div class="toast" id="toast" hidden></div>
 
-  <script src="local-store.js"></script>
-  <script src="app.js"></script>
-  <script src="pwa.js"></script>
+  <script src="/local-store.js"></script>
+  <script src="/app.js"></script>
+  <script src="/pwa.js"></script>
 </body>
 </html>
