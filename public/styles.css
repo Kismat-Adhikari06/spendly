@@ -448,7 +448,8 @@ input, select { font-family: inherit; font-size: 15px; }
 /* ---------- modal ---------- */
 .modal-root { position: fixed; inset: 0; z-index: 60; display: grid; place-items: end center; }
 .modal-root[hidden] { display: none; }
-.backdrop { position: absolute; inset: 0; background: rgba(15,15,25,0.45); backdrop-filter: blur(3px); animation: fade 0.2s ease; }
+.backdrop { position: absolute; inset: 0; background: rgba(15,15,25,0.55); animation: backdrop-in 0.2s ease; }
+@keyframes backdrop-in { from { opacity: 0; } to { opacity: 1; } }
 .sheet {
   position: relative;
   width: min(430px, 100%);
