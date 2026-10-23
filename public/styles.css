@@ -104,10 +104,10 @@ input, select { font-family: inherit; font-size: 15px; }
 .profile-card img[hidden], .topbar-actions img[hidden] { display: none; }
 .profile-photo-button, .onboarding-photo-button { min-height: 40px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 12px; color: var(--ink-2); background: #fafafd; font-size: 12px; font-weight: 600; }
 .profile-photo-button { margin-top: 6px; }
-.onboarding-root { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; overflow-y: auto; padding: 16px; background: rgba(20, 22, 29, .48); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
+.onboarding-root { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; overflow-y: auto; padding: 16px; background: rgba(20, 22, 29, .6); }
 .onboarding-root[hidden] { display: none; }
-.onboarding-dialog { position: relative; width: min(430px, 100%); height: min(790px, calc(100dvh - 32px)); min-height: 620px; max-height: calc(100dvh - 32px); display: flex; flex-direction: column; overflow-y: auto; padding: max(26px, env(safe-area-inset-top)) 26px max(24px, env(safe-area-inset-bottom)); border: 1px solid rgba(255,255,255,.8); border-radius: 30px; background: #f7f7f4; box-shadow: 0 28px 90px rgba(0,0,0,.3); animation: onboarding-enter .22s ease-out both; }
-@keyframes onboarding-enter { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
+.onboarding-dialog { position: relative; width: min(430px, 100%); height: min(790px, calc(100dvh - 32px)); min-height: 620px; max-height: calc(100dvh - 32px); display: flex; flex-direction: column; overflow-y: auto; padding: max(26px, env(safe-area-inset-top)) 26px max(24px, env(safe-area-inset-bottom)); border: 1px solid rgba(255,255,255,.8); border-radius: 30px; background: #f7f7f4; box-shadow: 0 12px 36px rgba(0,0,0,.25); animation: onboarding-enter .18s ease-out both; }
+@keyframes onboarding-enter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 .onboarding-back { width: 42px; height: 42px; display: grid; place-items: center; margin: 0 0 22px -10px; color: #171a22; }
 .onboarding-back svg { width: 25px; height: 25px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .onboarding-dialog h1 { margin: 0; color: #252833; text-align: center; font-size: clamp(25px, 7vw, 34px); line-height: 1.15; font-weight: 750; letter-spacing: -.9px; }
@@ -765,3 +765,6 @@ input, select { font-family: inherit; font-size: 15px; }
 .backup-reminder-actions button { min-height: 36px; padding: 6px 14px; border-radius: 12px; background: var(--violet); color: #fff; font-size: 12px; font-weight: 600; }
 .backup-reminder-actions button.ghost { background: transparent; color: var(--ink-2); }
 .onboarding-privacy { margin: 18px 0 0; color: #898a8f; text-align: center; font-size: 12px; line-height: 1.5; }
+.onboarding-skip { align-self: center; margin-top: 14px; min-height: 40px; padding: 8px 16px; color: #6b6b76; font-size: 14px; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+.onboarding-close { position: absolute; top: 18px; right: 18px; width: 42px; height: 42px; display: grid; place-items: center; border-radius: 50%; color: #171a22; }
+.onboarding-close svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }

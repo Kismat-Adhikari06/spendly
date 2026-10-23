@@ -970,6 +970,8 @@ async function saveProfileName(value, prompted = false, photo = state.profilePho
   renderProfilePhoto();
 }
 
+const ONBOARDING_SKIPPED_KEY = 'spendly.onboardingSkipped';
+
 async function promptForName() {
   const root = $('#onboarding-root');
   root.hidden = false;
@@ -999,10 +1001,17 @@ async function promptForName() {
     }
   };
   await new Promise((resolve) => {
-    $('#onboarding-back').onclick = () => {
+    const dismiss = () => {
       root.hidden = true;
+      root.onclick = null;
+      document.removeEventListener('keydown', onEscape);
+      writeStored(ONBOARDING_SKIPPED_KEY, 1);
       resolve();
     };
+    const onEscape = (event) => { if (event.key === 'Escape') dismiss(); };
+    document.addEventListener('keydown', onEscape);
+    root.onclick = (event) => { if (event.target === root) dismiss(); };
+    $('#onboarding-back').onclick = $('#onboarding-close').onclick = $('#onboarding-skip').onclick = dismiss;
     $('.onboarding-dialog').onsubmit = (event) => {
       event.preventDefault();
       $('#onboarding-continue').click();
@@ -1029,6 +1038,8 @@ async function promptForName() {
         firstNameInput.onkeydown = null;
         lastNameInput.onkeydown = null;
         root.hidden = true;
+        root.onclick = null;
+        document.removeEventListener('keydown', onEscape);
         resolve();
       } catch (error) {
         button.disabled = false;
@@ -1325,8 +1336,7 @@ document.body.addEventListener('click', async (e) => {
     renderProfilePhoto();
     await refresh();
     showScreen(screenFromLocation(), { push: false });
-    if (!state.profileName.trim() || !state.profileLastName.trim()) {
-      $('#onboarding-root').hidden = false;
+    if ((!state.profileName.trim() || !state.profileLastName.trim()) && !readStored(ONBOARDING_SKIPPED_KEY)) {
       await promptForName();
     }
   } catch (err) {
